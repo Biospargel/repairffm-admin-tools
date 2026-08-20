@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ganz ohne Name/E-Mail. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.7.0
+ * Version: 1.8.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -760,6 +760,11 @@ add_shortcode('rfat_manage_booking', function ($atts) {
  * rest of this toolkit. Hooked very late on wp_head so it wins the cascade
  * over the theme's own stylesheet and any Customizer CSS for equal-
  * specificity rules, without needing !important everywhere.
+ *
+ * Breakpoints: Layout-Anpassungen laufen bis 782px, das Handy-MENÜ dagegen
+ * bis 600px — das ist die Grenze, ab der WordPress' Navigationsblock auf
+ * Overlay umschaltet. Vorher standen beide auf 782px, wodurch zwischen 600
+ * und 782px Menü-Styling auf eine Desktop-Navigation traf.
  * ========================================================================= */
 add_action('wp_head', function () {
     ?>
@@ -800,8 +805,13 @@ add_action('wp_head', function () {
             color: #1f5a38;
         }
 
-        /* Sicherheitsabstand zum Bildschirmrand, überall */
-        html {
+        /*
+         * Waagerechten Überlauf abfangen. Bewusst auf body statt html:
+         * "overflow-x: hidden" auf dem html-Element schaltet in allen
+         * Browsern "position: sticky" für Kindelemente ab — ein klebriger
+         * Theme-Header hätte damit nicht mehr funktioniert.
+         */
+        body {
             overflow-x: hidden;
         }
         .rfat-pub-wrap {
@@ -827,6 +837,175 @@ add_action('wp_head', function () {
             line-height: 1.3 !important;
             min-height: 0 !important;
             box-sizing: border-box !important;
+        }
+
+        /* ============ Eigenständiges Handy-Menü (siehe wp_footer unten) ============ */
+        .rfat-nav-open {
+            display: none;
+            position: fixed;
+            top: 12px;
+            right: 12px;
+            z-index: 99998;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            padding: 0;
+            border: 1px solid #cfd8d2;
+            border-radius: 12px;
+            background: #fff;
+            color: #1c2a22;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(28, 42, 34, .12);
+        }
+        /* Eingeloggt schiebt die Adminleiste alles nach unten (mobil 46px hoch) */
+        body.admin-bar .rfat-nav-open {
+            top: 58px;
+        }
+        body.admin-bar .rfat-nav-overlay {
+            top: 46px;
+        }
+        .rfat-nav-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 99999;
+            display: flex;
+            flex-direction: column;
+            background: #f7f8f6;
+            /* Lange Menüs müssen scrollbar bleiben, sonst sind untere
+               Punkte auf kleinen Displays nicht erreichbar. */
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            opacity: 0;
+            transition: opacity .18s ease;
+        }
+        .rfat-nav-overlay.is-open {
+            opacity: 1;
+        }
+        .rfat-nav-overlay[hidden] {
+            display: none;
+        }
+        .rfat-nav-overlay__bar {
+            display: flex;
+            justify-content: flex-end;
+            padding: 12px;
+        }
+        .rfat-nav-close {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            padding: 0;
+            border: 1px solid #cfd8d2;
+            border-radius: 12px;
+            background: #fff;
+            color: #1c2a22;
+            cursor: pointer;
+        }
+        .rfat-nav-overlay__list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 8px 22px 28px;
+        }
+        .rfat-nav-link {
+            display: block;
+            box-sizing: border-box;
+            width: 100%;
+            padding: 15px 18px;
+            border: 1px solid #e7ebe8;
+            border-radius: 14px;
+            background: #fff;
+            color: #1c2a22;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 19px;
+            font-weight: 700;
+            text-decoration: none;
+        }
+        .rfat-nav-link:hover,
+        .rfat-nav-link:focus-visible {
+            background: #e8f1eb;
+            border-color: #2f7d4f;
+            color: #1f5a38;
+        }
+        .rfat-nav-link.is-active {
+            border-color: #2f7d4f;
+            background: #e8f1eb;
+            color: #1f5a38;
+        }
+        /* "Termin buchen" bleibt auch im Menü der grüne Haupt-Button */
+        .rfat-nav-link.is-primary,
+        .rfat-nav-link.is-primary:hover,
+        .rfat-nav-link.is-primary:focus-visible {
+            background: #2f7d4f;
+            border-color: #2f7d4f;
+            color: #fff;
+        }
+        /* Seite hinter dem offenen Menü nicht mitscrollen lassen */
+        .rfat-nav-locked body {
+            overflow: hidden;
+        }
+
+        @media (max-width: 600px) {
+            /* Nur auf dem Handy taucht der Hamburger auf. Das Skript nimmt
+               das [hidden] weg, sobald klar ist, dass das Theme kein
+               eigenes Menü mitbringt. */
+            .rfat-nav-open:not([hidden]) {
+                display: flex;
+            }
+
+            /* ---- Handy-Menü des Themes, falls doch eins da ist ---- */
+            .wp-block-navigation__responsive-container-open,
+            .wp-block-navigation__responsive-container-close {
+                padding: 10px !important;
+                border-radius: 10px;
+                color: #1c2a22;
+            }
+            .wp-block-navigation__responsive-container-open svg,
+            .wp-block-navigation__responsive-container-close svg {
+                width: 28px;
+                height: 28px;
+            }
+            .wp-block-navigation__responsive-container.is-menu-open {
+                background: #f7f8f6 !important;
+                padding: 76px 22px 28px !important;
+                overflow-y: auto !important;
+            }
+            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation__container {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+                width: 100%;
+            }
+            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item {
+                width: 100%;
+            }
+            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item a,
+            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item__content {
+                display: block !important;
+                width: 100% !important;
+                box-sizing: border-box !important;
+                font-size: 19px !important;
+                font-weight: 700 !important;
+                padding: 15px 18px !important;
+                border-radius: 14px !important;
+                color: #1c2a22 !important;
+                background: #fff;
+                border: 1px solid #e7ebe8;
+            }
+            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item a:active,
+            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item a:hover {
+                background: #e8f1eb;
+                border-color: #2f7d4f;
+            }
+            /* Der aktuelle grüne "Termin buchen"-Pill bleibt auch im Overlay grün */
+            .wp-block-navigation__responsive-container.is-menu-open .wp-element-button,
+            .wp-block-navigation__responsive-container.is-menu-open .current-menu-item > a {
+                background: #2f7d4f !important;
+                color: #fff !important;
+                border-color: #2f7d4f !important;
+            }
         }
 
         /* ============ Handy-Ansicht: Inhalt vom Rand lösen, alles schlanker ============ */
@@ -893,57 +1072,6 @@ add_action('wp_head', function () {
             .btn.ghost {
                 padding: 8px 16px;
             }
-
-            /* ---- Modernes Handy-Menü (Overlay des core/navigation-Blocks) ---- */
-            .wp-block-navigation__responsive-container-open,
-            .wp-block-navigation__responsive-container-close {
-                padding: 10px !important;
-                border-radius: 10px;
-                color: #1c2a22;
-            }
-            .wp-block-navigation__responsive-container-open svg,
-            .wp-block-navigation__responsive-container-close svg {
-                width: 28px;
-                height: 28px;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open {
-                background: #f7f8f6 !important;
-                padding: 76px 22px 28px !important;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation__container {
-                flex-direction: column;
-                align-items: stretch;
-                gap: 8px;
-                width: 100%;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item {
-                width: 100%;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item a,
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item__content {
-                display: block !important;
-                width: 100% !important;
-                box-sizing: border-box !important;
-                font-size: 19px !important;
-                font-weight: 700 !important;
-                padding: 15px 18px !important;
-                border-radius: 14px !important;
-                color: #1c2a22 !important;
-                background: #fff;
-                border: 1px solid #e7ebe8;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item a:active,
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item a:hover {
-                background: #e8f1eb;
-                border-color: #2f7d4f;
-            }
-            /* Der aktuelle grüne "Termin buchen"-Pill bleibt auch im Overlay grün */
-            .wp-block-navigation__responsive-container.is-menu-open .wp-element-button,
-            .wp-block-navigation__responsive-container.is-menu-open .current-menu-item > a {
-                background: #2f7d4f !important;
-                color: #fff !important;
-                border-color: #2f7d4f !important;
-            }
         }
 
         /* Ab sehr schmalen Screens: Aktions-Buttons stapeln statt quetschen */
@@ -973,26 +1101,29 @@ add_action('wp_footer', function () {
 
         /*
          * Fallback: Falls die Navigation kein core/navigation-Block ist und
-         * der Server-Filter unten deshalb nicht griff, "Termin abrufen"
+         * der Server-Filter deshalb nicht griff, "Termin abrufen"
          * hier clientseitig neben "Termine & Ort" einhängen.
          */
-        if (!document.querySelector('a[href*="termin-abrufen"]')) {
-            var ref = document.querySelector('header a[href*="termine-ort"], nav a[href*="termine-ort"]');
-            if (ref) {
-                var li = ref.closest('li');
-                if (li) {
-                    var clone = li.cloneNode(true);
-                    var a = clone.querySelector('a');
-                    a.setAttribute('href', '/termin-abrufen/');
-                    a.textContent = 'Termin abrufen';
-                    li.parentNode.insertBefore(clone, li.nextSibling);
-                } else {
-                    var a2 = ref.cloneNode(false);
-                    a2.setAttribute('href', '/termin-abrufen/');
-                    a2.textContent = 'Termin abrufen';
-                    ref.parentNode.insertBefore(a2, ref.nextSibling);
-                }
-            }
+        if (document.querySelector('a[href*="termin-abrufen"]')) { return; }
+
+        var ref = document.querySelector('header a[href*="termine-ort"], nav a[href*="termine-ort"]');
+        if (!ref) { return; }
+
+        var li = ref.closest('li');
+        if (li) {
+            var clone = li.cloneNode(true);
+            var a = clone.querySelector('a');
+            // Ohne diese Prüfung warf ein <li> ohne Link einen TypeError,
+            // der den Rest des Skripts mitgerissen hat.
+            if (!a) { return; }
+            a.setAttribute('href', '/termin-abrufen/');
+            a.textContent = 'Termin abrufen';
+            li.parentNode.insertBefore(clone, li.nextSibling);
+        } else {
+            var a2 = ref.cloneNode(false);
+            a2.setAttribute('href', '/termin-abrufen/');
+            a2.textContent = 'Termin abrufen';
+            ref.parentNode.insertBefore(a2, ref.nextSibling);
         }
     })();
     </script>
@@ -1000,17 +1131,16 @@ add_action('wp_footer', function () {
 }, 999);
 
 /* =========================================================================
- * NAVIGATION: "Termin abrufen" ins Menü + modernes Handy-Menü (Hamburger)
+ * NAVIGATION: "Termin abrufen" ins Menü + Overlay-Modus erzwingen
  *
- * Beides ohne Eingriff ins Theme:
- * - render_block_data zwingt den core/navigation-Block in den mobilen
- *   Overlay-Modus (WordPress' eingebautes Hamburger-Menü — barrierefrei,
- *   mit Schließen-Button und Fokus-Handling frei Haus).
- * - render_block_core/navigation hängt den Menüpunkt "Termin abrufen"
- *   serverseitig an die Linkliste an (kein Aufblitzen beim Laden).
+ * Beides ohne Eingriff ins Theme. Greift nur, wenn die Navigation
+ * tatsächlich ein core/navigation-Block ist — ist sie das nicht, übernimmt
+ * das eigenständige Handy-Menü weiter unten.
  * ========================================================================= */
 add_filter('render_block_data', function ($block) {
     if (($block['blockName'] ?? '') === 'core/navigation') {
+        // 'mobile' ist zwar WordPress-Default, aber Themes setzen hier
+        // gerne 'never' — dann rendert WordPress gar keinen Hamburger.
         $block['attrs']['overlayMenu'] = 'mobile';
         $block['attrs']['hasIcon']     = true;
     }
@@ -1033,6 +1163,313 @@ add_filter('render_block_core/navigation', function ($content) {
 });
 
 /* =========================================================================
+ * MENÜPUNKTE ERMITTELN (für das eigenständige Handy-Menü unten)
+ *
+ * Warum überhaupt: Das Handy-Menü des Themes kam nie zustande (kein
+ * Hamburger-Button im DOM). Das passiert, wenn die Kopf-Navigation KEIN
+ * core/navigation-Block ist — dann greift weder der overlayMenu-Filter noch
+ * WordPress' eingebautes Overlay, und es gibt schlicht keinen Button.
+ *
+ * Statt im Browser nach Links zu suchen (fragil), holen wir die Menüpunkte
+ * hier serverseitig aus den echten WordPress-Daten. Reihenfolge:
+ *   1. klassisches Menü (falls registriert)
+ *   2. wp_navigation-Post (so speichern Block-Themes ihre Menüs)
+ *   3. veröffentlichte Top-Level-Seiten
+ * ========================================================================= */
+
+/**
+ * Menüpunkte aus einem geparsten Block-Baum einsammeln (rekursiv, damit
+ * auch Untermenüs und in Gruppen verschachtelte Links mitkommen).
+ *
+ * @param array $blocks Ergebnis von parse_blocks().
+ * @return array<int,array{url:string,label:string}>
+ */
+function rfat_collect_nav_links($blocks) {
+    $items = [];
+    foreach ($blocks as $block) {
+        $name = $block['blockName'] ?? '';
+
+        if ($name === 'core/navigation-link' || $name === 'core/navigation-submenu') {
+            $url   = $block['attrs']['url'] ?? '';
+            $label = $block['attrs']['label'] ?? '';
+            if ($url !== '' && $label !== '') {
+                $items[] = ['url' => $url, 'label' => wp_strip_all_tags($label)];
+            }
+        } elseif ($name === 'core/page-list') {
+            foreach (rfat_menu_items_from_pages() as $page_item) {
+                $items[] = $page_item;
+            }
+        }
+
+        if (!empty($block['innerBlocks'])) {
+            foreach (rfat_collect_nav_links($block['innerBlocks']) as $child) {
+                $items[] = $child;
+            }
+        }
+    }
+    return $items;
+}
+
+/**
+ * Letzter Rückfallweg: veröffentlichte Top-Level-Seiten in Menü-Reihenfolge.
+ *
+ * @return array<int,array{url:string,label:string}>
+ */
+function rfat_menu_items_from_pages() {
+    $pages = get_pages([
+        'parent'      => 0,
+        'sort_column' => 'menu_order,post_title',
+        'post_status' => 'publish',
+    ]);
+    if (!is_array($pages)) {
+        return [];
+    }
+    $items = [];
+    foreach ($pages as $page) {
+        $items[] = [
+            'url'   => get_permalink($page->ID),
+            'label' => get_the_title($page->ID),
+        ];
+    }
+    return $items;
+}
+
+/**
+ * Die Menüpunkte für das Handy-Menü — mit Cache, damit die Block-Analyse
+ * nicht bei jedem Seitenaufruf erneut läuft.
+ *
+ * @return array<int,array{url:string,label:string}>
+ */
+function rfat_get_menu_items() {
+    $cached = get_transient('rfat_menu_items');
+    if (is_array($cached)) {
+        return $cached;
+    }
+
+    $items = [];
+
+    // 1. Klassisches Menü (falls das Theme eins registriert hat).
+    $locations = get_nav_menu_locations();
+    if (!empty($locations)) {
+        foreach ($locations as $menu_id) {
+            if (!$menu_id) {
+                continue;
+            }
+            $menu_objects = wp_get_nav_menu_items($menu_id);
+            if (!empty($menu_objects)) {
+                foreach ($menu_objects as $menu_item) {
+                    $items[] = [
+                        'url'   => $menu_item->url,
+                        'label' => $menu_item->title,
+                    ];
+                }
+                break;
+            }
+        }
+    }
+
+    // 2. Block-Theme: Menü liegt als wp_navigation-Post.
+    if (!$items) {
+        $navs = get_posts([
+            'post_type'        => 'wp_navigation',
+            'posts_per_page'   => 1,
+            'orderby'          => 'ID',
+            'order'            => 'ASC',
+            'suppress_filters' => false,
+        ]);
+        if (!empty($navs[0]->post_content)) {
+            $items = rfat_collect_nav_links(parse_blocks($navs[0]->post_content));
+        }
+    }
+
+    // 3. Nichts gefunden: einfach die Seiten nehmen.
+    if (!$items) {
+        $items = rfat_menu_items_from_pages();
+    }
+
+    // "Termin abrufen" sicherstellen (dieselbe Ergänzung wie in der Navigation).
+    $manage_url = home_url('/termin-abrufen/');
+    $has_manage = false;
+    foreach ($items as $item) {
+        if (strpos($item['url'], 'termin-abrufen') !== false) {
+            $has_manage = true;
+            break;
+        }
+    }
+    if (!$has_manage) {
+        $items[] = ['url' => $manage_url, 'label' => 'Termin abrufen'];
+    }
+
+    // Doppelte Ziele entfernen, Reihenfolge beibehalten.
+    $seen   = [];
+    $unique = [];
+    foreach ($items as $item) {
+        $key = untrailingslashit((string) $item['url']);
+        if ($key === '' || isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $unique[]   = $item;
+    }
+
+    set_transient('rfat_menu_items', $unique, 12 * HOUR_IN_SECONDS);
+
+    return $unique;
+}
+
+// Menü-Cache verwerfen, wenn sich Menüs oder Seiten ändern.
+add_action('wp_update_nav_menu', function () {
+    delete_transient('rfat_menu_items');
+});
+add_action('save_post', function ($post_id, $post) {
+    if (in_array($post->post_type, ['page', 'wp_navigation'], true)) {
+        delete_transient('rfat_menu_items');
+    }
+}, 10, 2);
+
+/* =========================================================================
+ * EIGENSTÄNDIGES HANDY-MENÜ (Hamburger)
+ *
+ * Button und Overlay werden komplett serverseitig ausgegeben — unabhängig
+ * davon, welchen Navigationsblock das Theme benutzt. Damit gibt es auf dem
+ * Handy in jedem Fall ein Menü.
+ *
+ * Doppelte Hamburger sind ausgeschlossen: Bringt das Theme ein eigenes,
+ * funktionierendes Overlay mit (core/navigation), entfernt das Skript unser
+ * Menü beim Laden wieder.
+ * ========================================================================= */
+add_action('wp_footer', function () {
+    if (is_admin()) {
+        return;
+    }
+    $items = rfat_get_menu_items();
+    if (!$items) {
+        return;
+    }
+    // Aktuelle Seite, um den passenden Menüpunkt zu markieren.
+    $current = '';
+    if (is_front_page() || is_home()) {
+        $current = untrailingslashit(home_url('/'));
+    } elseif (is_singular()) {
+        $permalink = get_permalink();
+        $current   = $permalink ? untrailingslashit($permalink) : '';
+    }
+    ?>
+    <button type="button" class="rfat-nav-open" id="rfat-nav-open"
+            aria-label="Menü öffnen" aria-expanded="false" aria-controls="rfat-nav-overlay" hidden>
+        <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path fill="currentColor" d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
+        </svg>
+    </button>
+
+    <div class="rfat-nav-overlay" id="rfat-nav-overlay" hidden>
+        <div class="rfat-nav-overlay__bar">
+            <button type="button" class="rfat-nav-close" id="rfat-nav-close" aria-label="Menü schließen">
+                <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path fill="currentColor" d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6 6.4 5z"/>
+                </svg>
+            </button>
+        </div>
+        <nav class="rfat-nav-overlay__list" aria-label="Hauptmenü">
+            <?php foreach ($items as $item) :
+                $url       = untrailingslashit((string) $item['url']);
+                $is_active = ($url !== '' && $url === $current);
+                $is_book   = (strpos($url, 'termin-buchen') !== false);
+                $classes   = 'rfat-nav-link'
+                    . ($is_active ? ' is-active' : '')
+                    . ($is_book ? ' is-primary' : '');
+                ?>
+                <a class="<?php echo esc_attr($classes); ?>" href="<?php echo esc_url($item['url']); ?>"
+                   <?php echo $is_active ? 'aria-current="page"' : ''; ?>>
+                    <?php echo esc_html($item['label']); ?>
+                </a>
+            <?php endforeach; ?>
+        </nav>
+    </div>
+
+    <script id="rfat-mobile-nav">
+    (function () {
+        var openBtn = document.getElementById('rfat-nav-open');
+        var overlay = document.getElementById('rfat-nav-overlay');
+        var closeBtn = document.getElementById('rfat-nav-close');
+        if (!openBtn || !overlay || !closeBtn) { return; }
+
+        /*
+         * Bringt das Theme schon ein eigenes Handy-Menü mit? Dann unseres
+         * restlos entfernen, damit nicht zwei Hamburger übereinanderliegen.
+         */
+        var themeToggle = document.querySelector('.wp-block-navigation__responsive-container-open');
+        if (themeToggle) {
+            document.documentElement.classList.add('rfat-nav-core');
+            openBtn.parentNode.removeChild(openBtn);
+            overlay.parentNode.removeChild(overlay);
+            return;
+        }
+        document.documentElement.classList.add('rfat-nav-fallback');
+        openBtn.hidden = false;
+
+        var lastFocus = null;
+
+        function openMenu() {
+            lastFocus = document.activeElement;
+            overlay.hidden = false;
+            // Erzwingt einen Reflow, damit der Einblend-Übergang greift.
+            void overlay.offsetWidth;
+            overlay.classList.add('is-open');
+            openBtn.setAttribute('aria-expanded', 'true');
+            document.documentElement.classList.add('rfat-nav-locked');
+            closeBtn.focus();
+            document.addEventListener('keydown', onKeydown);
+        }
+
+        function closeMenu() {
+            overlay.classList.remove('is-open');
+            openBtn.setAttribute('aria-expanded', 'false');
+            document.documentElement.classList.remove('rfat-nav-locked');
+            document.removeEventListener('keydown', onKeydown);
+            // Erst nach dem Ausblenden aus dem Fokusbaum nehmen.
+            window.setTimeout(function () {
+                if (!overlay.classList.contains('is-open')) { overlay.hidden = true; }
+            }, 200);
+            if (lastFocus && document.contains(lastFocus)) { lastFocus.focus(); }
+        }
+
+        function onKeydown(event) {
+            if (event.key === 'Escape') {
+                closeMenu();
+                return;
+            }
+            if (event.key !== 'Tab') { return; }
+            // Fokus im offenen Menü halten.
+            var focusable = overlay.querySelectorAll('a[href], button:not([disabled])');
+            if (!focusable.length) { return; }
+            var first = focusable[0];
+            var last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        }
+
+        openBtn.addEventListener('click', openMenu);
+        closeBtn.addEventListener('click', closeMenu);
+        // Klick auf die Fläche neben den Links schließt ebenfalls.
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) { closeMenu(); }
+        });
+        // Beim Wechsel auf Desktop-Breite aufräumen.
+        window.addEventListener('resize', function () {
+            if (window.innerWidth > 600 && overlay.classList.contains('is-open')) { closeMenu(); }
+        });
+    })();
+    </script>
+    <?php
+}, 1000);
+
+/* =========================================================================
  * AUTO-UPDATE VON GITHUB
  *
  * Nutzt den offiziellen WordPress-Mechanismus (seit 5.8): der "Update URI"-
@@ -1042,19 +1479,42 @@ add_filter('render_block_core/navigation', function ($content) {
  *
  * Damit ein Update erkannt wird, braucht es im Repo ein Release mit:
  *  - Tag wie "v1.8.0" oder "1.8.0" (muss zur Version im Plugin-Kopf passen)
- *  - der fertigen Plugin-Zip als Release-Asset (NICHT GitHubs
- *    automatisches "Source code (zip)" — das hat den falschen Ordnernamen)
+ *  - der fertigen Plugin-Zip als Release-Asset
+ *
+ * Der Ordnername in der Zip darf inzwischen abweichen: upgrader_source_selection
+ * unten biegt ihn vor der Installation auf den installierten Ordner zurück.
  * ========================================================================= */
 
 define('RFAT_GH_REPO', 'Biospargel/repairffm-admin-tools');
 define('RFAT_GH_CACHE_KEY', 'rfat_github_release');
 
 /**
+ * Der Plugin-Basename ("ordner/datei.php"), unter dem WordPress dieses
+ * Plugin führt. Wird für slug und Ordner-Korrektur beim Update gebraucht.
+ */
+function rfat_plugin_basename() {
+    return plugin_basename(__FILE__);
+}
+
+/**
+ * Der Ordnername des Plugins — oder der Dateiname ohne Endung, falls das
+ * Plugin als Einzeldatei direkt in /wp-content/plugins/ liegt (dann liefert
+ * dirname() nämlich "." und der Slug wäre kaputt).
+ */
+function rfat_plugin_slug() {
+    $dir = dirname(rfat_plugin_basename());
+    if ($dir === '.' || $dir === '' || $dir === DIRECTORY_SEPARATOR) {
+        return basename(__FILE__, '.php');
+    }
+    return $dir;
+}
+
+/**
  * Neuestes Release von GitHub holen (mit Cache, damit das API-Limit von
  * 60 Anfragen/Stunde nicht ausgereizt wird).
  *
  * @param bool $force Cache umgehen (z. B. bei "Erneut prüfen").
- * @return array{version:string,package:string,url:string}|null
+ * @return array{version:string,package:string,url:string,published:string}|null
  */
 function rfat_fetch_latest_release($force = false) {
     if (!$force) {
@@ -1089,16 +1549,33 @@ function rfat_fetch_latest_release($force = false) {
         return null;
     }
 
-    // Die hochgeladene Plugin-Zip suchen (Source-Code-Zip ignorieren).
-    $package = '';
+    /*
+     * Die hochgeladene Plugin-Zip suchen. Bevorzugt eine, deren Name zum
+     * Plugin passt — sonst die erste Zip. GitHubs automatische
+     * "Source code (zip)" taucht in assets[] gar nicht auf, die steckt in
+     * zipball_url und wird hier bewusst nur als letzter Ausweg genommen.
+     */
+    $package  = '';
+    $slug     = rfat_plugin_slug();
+    $fallback = '';
     if (!empty($body['assets']) && is_array($body['assets'])) {
         foreach ($body['assets'] as $asset) {
-            if (!empty($asset['browser_download_url'])
-                && substr((string) $asset['name'], -4) === '.zip') {
-                $package = $asset['browser_download_url'];
+            $name = (string) ($asset['name'] ?? '');
+            $url  = (string) ($asset['browser_download_url'] ?? '');
+            if ($url === '' || substr($name, -4) !== '.zip') {
+                continue;
+            }
+            if (stripos($name, $slug) !== false) {
+                $package = $url;
                 break;
             }
+            if ($fallback === '') {
+                $fallback = $url;
+            }
         }
+    }
+    if ($package === '') {
+        $package = $fallback;
     }
     if ($package === '') {
         set_site_transient(RFAT_GH_CACHE_KEY, 'none', HOUR_IN_SECONDS);
@@ -1106,9 +1583,10 @@ function rfat_fetch_latest_release($force = false) {
     }
 
     $release = [
-        'version' => ltrim((string) $body['tag_name'], 'vV'),
-        'package' => $package,
-        'url'     => !empty($body['html_url']) ? $body['html_url'] : 'https://github.com/' . RFAT_GH_REPO,
+        'version'   => ltrim((string) $body['tag_name'], 'vV'),
+        'package'   => $package,
+        'url'       => !empty($body['html_url']) ? $body['html_url'] : 'https://github.com/' . RFAT_GH_REPO,
+        'published' => (string) ($body['published_at'] ?? ''),
     ];
 
     set_site_transient(RFAT_GH_CACHE_KEY, $release, 6 * HOUR_IN_SECONDS);
@@ -1130,13 +1608,56 @@ add_filter('update_plugins_github.com', function ($update, $plugin_data, $plugin
         return $update;
     }
 
+    /*
+     * Vollständiger Satz Felder: die Update-Oberfläche und der Installer
+     * lesen je nach Ansicht "version" ODER "new_version", und ohne "plugin"
+     * bzw. "id" bleibt die Zeile auf der Plugin-Seite leer.
+     */
     return [
-        'slug'    => dirname($plugin_file),
-        'version' => $release['version'],
-        'url'     => $release['url'],
-        'package' => $release['package'],
+        'id'           => 'github.com/' . RFAT_GH_REPO,
+        'slug'         => rfat_plugin_slug(),
+        'plugin'       => $plugin_file,
+        'version'      => $release['version'],
+        'new_version'  => $release['version'],
+        'url'          => $release['url'],
+        'package'      => $release['package'],
+        'tested'       => get_bloginfo('version'),
+        'requires_php' => '7.4',
     ];
 }, 10, 3);
+
+/**
+ * Den entpackten Ordner auf den installierten Namen zurückbiegen.
+ *
+ * GitHub-Zips heißen je nach Bauart "repo-1.8.0" o. ä. Ohne diese Korrektur
+ * würde WordPress das Plugin unter dem neuen Ordnernamen installieren — das
+ * alte bliebe liegen und das Plugin wäre nach dem Update deaktiviert.
+ */
+add_filter('upgrader_source_selection', function ($source, $remote_source, $upgrader, $args = []) {
+    global $wp_filesystem;
+
+    $plugin_file = $args['plugin'] ?? '';
+    if ($plugin_file !== rfat_plugin_basename()) {
+        return $source; // Anderes Plugin: nicht anfassen.
+    }
+    if (!$wp_filesystem) {
+        return $source;
+    }
+
+    $desired = trailingslashit($remote_source) . rfat_plugin_slug();
+    if (untrailingslashit($source) === $desired) {
+        return $source; // Passt schon.
+    }
+
+    if ($wp_filesystem->move(untrailingslashit($source), $desired)) {
+        return trailingslashit($desired);
+    }
+
+    return new WP_Error(
+        'rfat_rename_failed',
+        'Der entpackte Plugin-Ordner konnte nicht auf "' . rfat_plugin_slug() . '" umbenannt werden.'
+    );
+}, 10, 4);
 
 // Bei "Erneut prüfen" im Dashboard den Cache verwerfen, damit sofort die
 // echten GitHub-Daten geholt werden statt der bis zu 6 Stunden alten.

@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 20.08.2026 · Plugin-Version 1.7.0
+Stand: 20.08.2026 · Plugin-Version 1.8.0
 
 ---
 
@@ -84,7 +84,7 @@ Ein **eigenständiges Companion-Plugin**, das die Buchungslogik nicht anfasst,
 sondern nur ergänzt. Eine einzige PHP-Datei, keine Fremdabhängigkeiten.
 
 - **Repo:** https://github.com/Biospargel/repairffm-admin-tools
-- **Aktuelle Version:** 1.7.0
+- **Aktuelle Version:** 1.8.0
 - **Funktions-Präfix:** `rfat_` (RepairFfmAdminTools)
 
 ### Warum ein separates Plugin?
@@ -212,6 +212,7 @@ Nutzt den **offiziellen WordPress-Mechanismus** (seit 5.8):
 | 1.5.0 | Randabstand über Root-Padding-Variablen; Buttons über `.wp-element-button` |
 | 1.6.0 | „Termin abrufen" im Menü + Hamburger-Overlay auf dem Handy |
 | 1.7.0 | GitHub-Auto-Update eingebaut |
+| 1.8.0 | Eigenständiges Handy-Menü (unabhängig vom Theme-Block); Updater gehärtet |
 
 ---
 
@@ -253,28 +254,35 @@ PHP-Standardzeitzone.
 
 ## 7. Offene Punkte
 
-### Mobile Darstellung — ungeprüft ⚠️
+### Mobile Darstellung — teilweise geklärt
 
-Die Versionen 1.4.0–1.6.0 wurden **nie visuell verifiziert**. Die letzten
-Screenshots zeigten trotz Änderungen keine Wirkung. Ungeklärt ist, ob
+**Ursache des fehlenden Hamburger-Menüs gefunden (1.8.0):** Der Button fehlte
+komplett im DOM. WordPress rendert das Overlay-Markup — und damit den Button —
+ausschließlich für `core/navigation`-Blöcke. Ist die Kopf-Navigation ein
+anderer Block (oder ein klassisches Menü), greift weder `overlayMenu` noch
+das eingebaute Overlay, und es entsteht schlicht kein Button. Genau das hatte
+der JS-Fallback in 1.6.0 schon vermutet.
 
-- die Versionen nicht aktiv waren,
-- ein Cache dazwischenlag, oder
-- die CSS-Selektoren am Theme vorbeizielen.
+**Lösung:** Ein eigenständiges Handy-Menü, das Button und Overlay
+serverseitig ausgibt und die Menüpunkte aus echten WordPress-Daten holt
+(klassisches Menü → `wp_navigation`-Post → Seiten). Bringt das Theme doch ein
+funktionierendes Overlay mit, entfernt sich unseres beim Laden selbst — es
+kann also nie zwei Hamburger geben.
 
-**Zuerst prüfen**, bevor weitere CSS-Regeln geschrieben werden. Mit
-Dateizugriff lässt sich das Theme direkt lesen statt zu raten:
-`/wp-content/themes/<theme>/theme.json` und die Template-Dateien zeigen die
-echten Klassen und Padding-Werte.
+**Selbstdiagnose:** Das Skript setzt eine Klasse auf `<html>`:
+`rfat-nav-core` (Theme-Menü übernimmt) oder `rfat-nav-fallback` (unseres
+läuft). Damit lässt sich im Browser-Inspektor in zwei Sekunden feststellen,
+welcher Weg aktiv ist — statt wie bisher zu raten.
 
-Konkret offen: Buttons wirkten „zu dick", Inhalte klebten am Bildschirmrand,
-Hamburger-Menü unbestätigt.
+Weiter offen: Buttons wirkten „zu dick", Inhalte klebten am Bildschirmrand.
+Beides ungeprüft, weil biospargel.org aus der Sandbox nicht erreichbar ist.
 
 ### Kleinere Punkte
 
 - Customizer → Zusätzliches CSS enthält noch die alten `.btn`-Regeln.
   Seit 1.3.0 redundant, kann gelöscht werden.
-- Erstes GitHub-Release muss noch angelegt werden (Repo ist leer bis auf README).
+- Erstes GitHub-Release muss noch angelegt werden — Zip für 1.8.0 ist gebaut,
+  Release + Asset-Upload muss von Hand im GitHub-UI passieren.
 - Kennwortschutz ist noch aktiv — vor dem Livegang deaktivieren.
 
 ---
