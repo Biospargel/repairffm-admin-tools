@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.9.2
+ * Version: 1.9.3
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1671,6 +1671,38 @@ add_action('wp_head', function () {
             line-height: 1.5;
             color: #5b6b62;
         }
+        .rfat-ab-input {
+            display: block;
+            box-sizing: border-box;
+            width: 100%;
+            padding: 12px 14px;
+            margin-bottom: 10px;
+            border: 1.5px solid #d7e0da;
+            border-radius: 11px;
+            background: #fff;
+            color: #1c2a22;
+            font-size: 16px; /* unter 16px zoomt iOS beim Antippen hinein */
+            font-family: inherit;
+        }
+        .rfat-ab-input:focus {
+            outline: none;
+            border-color: #2f7d4f;
+            box-shadow: 0 0 0 3px rgba(47, 125, 79, .15);
+        }
+        .rfat-ab-keep {
+            display: flex;
+            gap: 9px;
+            align-items: flex-start;
+            margin: 0 0 12px;
+            font-size: 12px;
+            line-height: 1.45;
+            color: #5b6b62;
+            cursor: pointer;
+        }
+        .rfat-ab-keep input { margin-top: 2px; flex-shrink: 0; width: 17px; height: 17px; }
+        .rfat-ab-hint { margin: 0 0 10px; font-size: 13px; color: #b3402f; }
+        .rfat-ab-btn[disabled] { opacity: .65; cursor: default; }
+
         .rfat-ab-row { display: flex; flex-direction: column; gap: 8px; }
         .rfat-ab-btn {
             display: block;
@@ -1728,6 +1760,10 @@ add_action('wp_footer', function () {
     <script id="rfat-btn-cleanup">
     window.rfatShowDiag = <?php echo $show_diag; ?>;
     var rfatManageUrl = <?php echo wp_json_encode(home_url('/termin-abrufen/')); ?>;
+    var rfatAjax = <?php echo wp_json_encode([
+        'url'   => admin_url('admin-ajax.php'),
+        'nonce' => wp_create_nonce('rfat_save_email'),
+    ]); ?>;
     (function () {
         var b = document.getElementById('rc-open');
         if (b) { b.textContent = b.textContent.replace(/[\u{1F4C5}\u{FE0F}]/gu, '').trim(); }
@@ -1875,18 +1911,86 @@ add_action('wp_footer', function () {
              * ist das eine Anfrage, die noch bestätigt werden muss - hier wird
              * das richtiggestellt, solange wir an jenen Text nicht herankommen. */
             intro.textContent = 'Wir sehen uns deine Anfrage an und bestätigen sie. '
-                + 'Über diesen Link kommst du jederzeit zurück — Stand ansehen, '
-                + 'verschieben, absagen, oder eine E-Mail hinterlegen, wenn du '
-                + 'über die Bestätigung benachrichtigt werden möchtest.';
+                + 'Magst du darüber benachrichtigt werden? Dann trag hier freiwillig '
+                + 'eine E-Mail ein — nötig ist sie nicht, dein Code genügt.';
             box.appendChild(intro);
+
+            /* Adresse gleich hier abfragen statt erst auf der naechsten
+             * Seite: Wer den Bestaetigungsschritt wegklickt, kommt sonst
+             * nie dazu. Freiwillig bleibt es trotzdem - der Weg darunter
+             * fuehrt ohne Eingabe weiter. */
+            var mail = document.createElement('input');
+            mail.type = 'email';
+            mail.className = 'rfat-ab-input';
+            mail.placeholder = 'dein@beispiel.de (freiwillig)';
+            mail.setAttribute('aria-label', 'E-Mail-Adresse, freiwillig');
+            box.appendChild(mail);
+
+            var keepWrap = document.createElement('label');
+            keepWrap.className = 'rfat-ab-keep';
+            var keep = document.createElement('input');
+            keep.type = 'checkbox';
+            keepWrap.appendChild(keep);
+            var keepText = document.createElement('span');
+            keepText.textContent = 'Adresse darf auch nach dem Termin gespeichert bleiben. '
+                + 'Ohne Haken wird sie danach automatisch gelöscht.';
+            keepWrap.appendChild(keepText);
+            box.appendChild(keepWrap);
+
+            var hint = document.createElement('p');
+            hint.className = 'rfat-ab-hint';
+            box.appendChild(hint);
 
             var row = document.createElement('div');
             row.className = 'rfat-ab-row';
 
+            var save = document.createElement('button');
+            save.type = 'button';
+            save.className = 'rfat-ab-btn';
+            save.textContent = 'E-Mail speichern und weiter';
+            save.addEventListener('click', function () {
+                if (!mail.value) {
+                    hint.textContent = 'Bitte eine Adresse eingeben — oder unten ohne fortfahren.';
+                    mail.focus();
+                    return;
+                }
+                save.disabled = true;
+                save.textContent = 'Wird gespeichert …';
+                hint.textContent = '';
+
+                var body = 'action=rfat_save_email'
+                    + '&nonce=' + encodeURIComponent(rfatAjax.nonce)
+                    + '&code=' + encodeURIComponent(code)
+                    + '&email=' + encodeURIComponent(mail.value)
+                    + (keep.checked ? '&keep=1' : '');
+
+                fetch(rfatAjax.url, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+                    credentials: 'same-origin',
+                    body: body
+                }).then(function (r) { return r.json(); }).then(function (res) {
+                    if (res && res.success && res.data && res.data.redirect) {
+                        window.location.href = res.data.redirect;
+                        return;
+                    }
+                    save.disabled = false;
+                    save.textContent = 'E-Mail speichern und weiter';
+                    hint.textContent = (res && res.data && res.data.message)
+                        ? res.data.message
+                        : 'Das hat nicht geklappt. Du kannst die Adresse auch auf der nächsten Seite eintragen.';
+                }).catch(function () {
+                    save.disabled = false;
+                    save.textContent = 'E-Mail speichern und weiter';
+                    hint.textContent = 'Keine Verbindung. Du kannst die Adresse auch auf der nächsten Seite eintragen.';
+                });
+            });
+            row.appendChild(save);
+
             var manage = document.createElement('a');
-            manage.className = 'rfat-ab-btn';
+            manage.className = 'rfat-ab-btn rfat-ab-ghost';
             manage.href = rfatManageUrl + '?code=' + encodeURIComponent(code);
-            manage.textContent = 'Termin bearbeiten & E-Mail hinterlegen';
+            manage.textContent = 'Ohne E-Mail weiter zum Termin';
             row.appendChild(manage);
 
             var cal = document.createElement('a');
@@ -2191,6 +2295,83 @@ add_action('wp_footer', function () {
     </div>
     <?php
 }, 1001);
+
+/* =========================================================================
+ * E-MAIL DIREKT IM BESTÄTIGUNGSSCHRITT
+ *
+ * Das Buchungsformular gehört dem Kern-Plugin. Statt es anzufassen,
+ * nimmt dieser Endpunkt die Adresse entgegen, die unser eingehängter
+ * Block abfragt. Der fremde Ablauf bleibt dadurch unberührt.
+ *
+ * Der Buchungscode ist der Ausweis — wie überall sonst hier auch. Wer ihn
+ * hat, hat gerade gebucht.
+ * ========================================================================= */
+add_action('wp_ajax_rfat_save_email', 'rfat_ajax_save_email');
+add_action('wp_ajax_nopriv_rfat_save_email', 'rfat_ajax_save_email');
+
+function rfat_ajax_save_email() {
+    check_ajax_referer('rfat_save_email', 'nonce');
+
+    $code  = sanitize_text_field(wp_unslash($_POST['code'] ?? ''));
+    $email = sanitize_email(wp_unslash($_POST['email'] ?? ''));
+    $keep  = !empty($_POST['keep']);
+
+    if ($code === '' || !is_email($email)) {
+        wp_send_json_error(['message' => 'Bitte eine gültige E-Mail-Adresse eingeben.']);
+    }
+
+    $match = rfat_find_booking_by_code($code);
+    if (!$match) {
+        wp_send_json_error(['message' => 'Zu diesem Code wurde keine Buchung gefunden.']);
+    }
+
+    $post_id = $match['post']->ID;
+    update_post_meta($post_id, RFAT_EMAIL_META, $email);
+    if ($keep) {
+        update_post_meta($post_id, RFAT_EMAIL_KEEP_META, '1');
+    } else {
+        delete_post_meta($post_id, RFAT_EMAIL_KEEP_META);
+    }
+
+    rfat_notify_email_added($post_id, $email);
+
+    wp_send_json_success([
+        'redirect' => home_url('/termin-abrufen/?code=' . rawurlencode(rfat_normalize_code($code))),
+    ]);
+}
+
+/**
+ * Nachtrag an die Werkstatt, wenn kurz nach der Anfrage eine Adresse
+ * hinterlegt wird.
+ *
+ * Die Anfrage-Mail geht sofort raus, die Adresse tippt der Gast erst
+ * Sekunden später - sie kann in jener Mail also nicht stehen. Den Versand
+ * so lange aufzuschieben wäre die elegantere Lösung, hängt aber an
+ * WordPress' Cron, der auf einer ruhigen Seite stundenlang schlafen kann.
+ * Eine verspätete Anfrage-Mail wäre schlimmer als eine zweite kurze.
+ *
+ * Deshalb nur ein Nachtrag, und nur wenn die Anfrage frisch ist — wer
+ * seine Adresse Tage später über die Abruf-Seite nachträgt, löst keine
+ * Mail aus.
+ */
+function rfat_notify_email_added($post_id, $email) {
+    $created = get_post_time('U', true, $post_id);
+    if (!$created || (time() - $created) > 30 * MINUTE_IN_SECONDS) {
+        return;
+    }
+    $to = rfat_notify_recipients();
+    if (!$to) {
+        return;
+    }
+    $body = "Zu einer gerade eingegangenen Anfrage wurde eine E-Mail-Adresse hinterlegt.\n\n"
+          . rfat_booking_summary($post_id) . "\n"
+          . "E-Mail:  " . $email . "\n\n"
+          . "Zusagen:\n" . rfat_action_url($post_id, 'bestaetigen') . "\n\n"
+          . "Absagen:\n" . rfat_action_url($post_id, 'absagen') . "\n\n"
+          . "-- \nAutomatische Nachricht von " . get_bloginfo('name');
+
+    rfat_send_logged($to, sprintf('[%s] Nachtrag: E-Mail zur Anfrage', get_bloginfo('name')), $body);
+}
 
 /* =========================================================================
  * KALENDEREINTRAG (.ics)
