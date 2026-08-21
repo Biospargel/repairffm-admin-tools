@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.14.0
+ * Version: 1.14.1
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1405,6 +1405,18 @@ add_action('wp_head', function () {
          * eine große Trefferfläche, weiter unten soll sie möglichst wenig
          * vom Inhalt verdecken.
          */
+        /*
+         * Kein Balken hinter dem Knopf.
+         *
+         * Ein Zwischenstand hatte hier eine weisse, halbdurchsichtige
+         * Leiste. Beim Scrollen zog sie eine harte Kante quer durch den
+         * Text — Zeilen wurden mittendrin abgeschnitten, darueber lief der
+         * Inhalt weiter. Das sah nach Fehler aus, und es war auch einer.
+         *
+         * Der Knopf traegt seinen eigenen Schatten und steht damit auf
+         * jedem Untergrund fuer sich. Ein Balken bringt nichts ausser der
+         * Kante.
+         */
         .rfat-topbar {
             display: none;
             position: fixed;
@@ -1416,19 +1428,13 @@ add_action('wp_head', function () {
             align-items: center;
             padding: 12px max(12px, env(safe-area-inset-right))
                      12px max(12px, env(safe-area-inset-left));
-            background: rgba(255, 255, 255, 0);
             /* Die Leiste selbst faengt keine Klicks ab - nur ihr Knopf. */
             pointer-events: none;
-            transition: padding .18s ease, background-color .18s ease,
-                        box-shadow .18s ease;
+            transition: padding .2s ease, top .2s ease;
         }
         .rfat-topbar.is-small {
-            padding-top: 7px;
-            padding-bottom: 7px;
-            background: rgba(255, 255, 255, .94);
-            box-shadow: 0 1px 12px rgba(28, 42, 34, .10);
-            backdrop-filter: saturate(1.4) blur(8px);
-            -webkit-backdrop-filter: saturate(1.4) blur(8px);
+            padding-top: 8px;
+            padding-bottom: 8px;
         }
         /*
          * Der Knopf war weiss mit dünnem Rand — auf dem ohnehin weissen
@@ -1506,9 +1512,27 @@ add_action('wp_head', function () {
                 transition: none;
             }
         }
-        /* Eingeloggt schiebt die Adminleiste alles nach unten (mobil 46px hoch) */
+        /*
+         * Die Adminleiste sehen nur eingeloggte Team-Mitglieder, und sie
+         * verhaelt sich je nach Fenster anders: Am Rechner ist sie fest
+         * verankert (32px), auf dem Handy scrollt sie mit weg. Ein fester
+         * Versatz von 46px liess deshalb beim Scrollen oben eine Luecke
+         * offen, durch die der Seiteninhalt lief.
+         *
+         * Also: auf dem Handy nur solange ausweichen, wie noch nicht
+         * gescrollt wurde.
+         */
         body.admin-bar .rfat-topbar {
             top: 46px;
+        }
+        body.admin-bar .rfat-topbar.is-small {
+            top: 0;
+        }
+        @media screen and (min-width: 783px) {
+            body.admin-bar .rfat-topbar,
+            body.admin-bar .rfat-topbar.is-small {
+                top: 32px;
+            }
         }
         body.admin-bar .rfat-nav-overlay {
             top: 46px;

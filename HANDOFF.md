@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.14.0
+Stand: 21.08.2026 · Plugin-Version 1.14.1
 
 ---
 
@@ -314,6 +314,7 @@ Versionssprung zum ersten Mal.
 | 1.12.0 | **Buchung ins Plugin geholt** — aktualisiert sich über GitHub; Schrittanzeige; Einleitung ab Schritt 2 aus |
 | 1.13.0 | Kopfleiste mit großem Hamburger, schrumpft beim Scrollen; Theme-Menü über die **Adressen** ausgeblendet statt über geratene Klassen |
 | 1.14.0 | Logo und Seitentitel verschont (1.13.0 nahm sie mit); Theme-Menü wird **serverseitig entfernt** statt versteckt — kein Aufblitzen, 149 Zeilen weniger |
+| 1.14.1 | Balken hinter dem Hamburger entfernt (schnitt beim Scrollen durch den Text); Versatz für die Adminleiste richtiggestellt |
 
 ---
 
@@ -683,6 +684,46 @@ Zeilen.
 | `<header>` außen, `<nav>` innen | nur das `<nav>`, Header unberührt |
 | Fließtext mit einem Menülink | unberührt |
 | nur Logo- und Titel-Link | unberührt |
+
+---
+
+### Kein Balken hinter dem Knopf (1.14.1)
+
+1.13.0 legte beim Scrollen eine weiße, halbdurchsichtige Leiste hinter den
+Hamburger. Auf dem Handy sah das kaputt aus, aus **zwei** Gründen:
+
+**1. Die harte Kante.** Der Balken zog eine waagerechte Linie quer durch
+den Fließtext — Zeilen wurden mittendrin abgeschnitten. Ein Balken bringt
+nichts, was der Schatten des Knopfes nicht auch leistet; er ist ersatzlos
+weg.
+
+**2. Der Versatz für die Adminleiste war falsch.** WordPress' Adminleiste
+verhält sich je nach Fensterbreite anders:
+
+| Fenster | `#wpadminbar` | Höhe |
+|---|---|---|
+| ≥ 783 px | `position: fixed` — bleibt oben stehen | 32 px |
+| ≤ 782 px | `position: absolute` — **scrollt mit weg** | 46 px |
+
+`body.admin-bar .rfat-topbar { top: 46px }` galt für beide. Auf dem Handy
+blieb die Leiste dadurch 46 px unter dem Fensterrand hängen, obwohl die
+Adminleiste längst weggescrollt war — und durch die Lücke darüber lief der
+Seiteninhalt. Genau das Abgeschnittene im Screenshot vom 21.08.
+
+Richtig ist:
+
+```css
+body.admin-bar .rfat-topbar          { top: 46px; }  /* noch nicht gescrollt */
+body.admin-bar .rfat-topbar.is-small { top: 0; }     /* Adminleiste ist weg */
+@media screen and (min-width: 783px) {
+    body.admin-bar .rfat-topbar,
+    body.admin-bar .rfat-topbar.is-small { top: 32px; }
+}
+```
+
+> Betroffen waren nur eingeloggte Team-Mitglieder — Besucher:innen haben
+> keine Adminleiste. Deshalb fiel es erst beim Draufschauen auf und nicht
+> im Test.
 
 ---
 
