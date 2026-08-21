@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.14.1
+Stand: 21.08.2026 · Plugin-Version 1.15.0
 
 ---
 
@@ -315,6 +315,7 @@ Versionssprung zum ersten Mal.
 | 1.13.0 | Kopfleiste mit großem Hamburger, schrumpft beim Scrollen; Theme-Menü über die **Adressen** ausgeblendet statt über geratene Klassen |
 | 1.14.0 | Logo und Seitentitel verschont (1.13.0 nahm sie mit); Theme-Menü wird **serverseitig entfernt** statt versteckt — kein Aufblitzen, 149 Zeilen weniger |
 | 1.14.1 | Balken hinter dem Hamburger entfernt (schnitt beim Scrollen durch den Text); Versatz für die Adminleiste richtiggestellt |
+| 1.15.0 | Weniger Datenbank-Zugriffe (Meta-Batching, zwei kurze Caches); CSS wird **beim Ausliefern** gestrichen statt in der Quelle |
 
 ---
 
@@ -684,6 +685,62 @@ Zeilen.
 | `<header>` außen, `<nav>` innen | nur das `<nav>`, Header unberührt |
 | Fließtext mit einem Menülink | unberührt |
 | nur Logo- und Titel-Link | unberührt |
+
+---
+
+### Performance — und was davon nicht übernommen wurde (1.15.0)
+
+Am 21.08.2026 kam eine fremde Fassung 1.15.0 („Klima-Update") herein.
+Vier ihrer fünf Änderungen sind übernommen, zwei davon anders umgesetzt,
+eine ist **abgelehnt**.
+
+**Übernommen:**
+
+| Änderung | Wirkung |
+|---|---|
+| Meta-Batching in `rfat_analyse_booking` | `$all_meta` war schon geladen; vier `get_post_meta` je Buchung fielen weg |
+| `no_found_rows`, kein Term-Cache | spart die Zähl-Abfrage; Buchungen haben keine Kategorien |
+| Buchungs-Lookup 60 s gecacht | die Selbstverwaltungs-Seite schlägt denselben Code mehrfach nach |
+| Slot-Belegung 2 min gecacht | steht auf jeder Slot-Seite an |
+
+Gemessen mit gestubbter Umgebung: erster Aufruf 3 DB-Zugriffe, zweiter 0.
+
+**Anders umgesetzt — Cache-Invalidierung am Hook statt an der Aufrufstelle.**
+Die fremde Fassung rief `delete_transient` an den Stellen auf, die ihr
+bekannt waren. Storniert wird aber an **vier** Stellen (Selbstverwaltung,
+Verschieben, Mail-Link, Papierkorb im Backend), und die fünfte kommt
+bestimmt. Jetzt hängt es an `save_post_rc_booking`, `trashed_post`,
+`untrashed_post` und `before_delete_post` — das kann man nicht vergessen.
+
+**Anders umgesetzt — CSS beim Ausliefern statt in der Quelle.**
+Die fremde Fassung hatte das CSS *in der Datei* minifiziert: aus 593 Zeilen
+mit 23 erklärenden Kommentaren wurden drei Zeilen, eine davon 6768 Zeichen
+lang. Beim Besucher kommt so dasselbe an — aber die Begründungen waren weg,
+und genau die haben hier mehrfach verhindert, dass ein Fehler ein zweites
+Mal passiert.
+
+`rfat_minify_style_tags()` streicht jetzt beim Senden. Nachgemessen: **13 393
+Zeichen, beide Fassungen zeichengleich.** Quelle wieder 593 Zeilen mit 23
+Kommentaren.
+
+> **Abgelehnt: `Cache-Control: public, max-age=86400` auf der .ics-Datei.**
+>
+> ```php
+> nocache_headers();                                  // Zeile 1765
+> …
+> header('Cache-Control: public, max-age=86400');     // Zeile 1769 — hebt es auf
+> ```
+>
+> Die Datei liegt unter `?ics=RC-XXXXX` und enthält Termin, Kategorie und
+> Buchungscode einer bestimmten Person. `public` erlaubt **jedem
+> Zwischenspeicher** — und die Seite läuft laut eigener
+> Datenschutzerklärung über Cloudflare — diese Datei einen Tag lang
+> vorzuhalten und auszuliefern. Das widerspricht der Datensparsamkeit, die
+> die Seite zusagt. Dazu kommt: Wird der Termin verschoben oder storniert,
+> bekommt man 24 Stunden lang die alte Datei.
+>
+> Persönliche Daten gehören nicht in einen geteilten Cache.
+> `nocache_headers()` bleibt.
 
 ---
 

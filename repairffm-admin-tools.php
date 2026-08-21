@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.14.1
+ * Version: 1.15.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -46,6 +46,31 @@ define('RFAT_NOTIFY_OPTION', 'rfat_notify_to');
 define('RFAT_NOTIFY_DEFAULT', 'repair.ffm@outlook.com');
 
 // Internal WP core meta keys we never want to show/edit.
+/**
+ * CSS beim Ausliefern zusammenstreichen — nicht in der Quelldatei.
+ *
+ * Eine fremde Fassung (1.15.0) hatte das CSS direkt in der Datei
+ * minifiziert: aus 593 Zeilen mit 23 erklaerenden Kommentaren wurden drei
+ * Zeilen, eine davon 6768 Zeichen lang. Beim Besucher kommt so zwar
+ * dasselbe an, aber die Begruendungen waren weg — und genau die haben in
+ * diesem Plugin mehrfach verhindert, dass ein Fehler ein zweites Mal
+ * gemacht wird (Versatz fuer die Adminleiste, der weggelassene Balken,
+ * pointer-events auf der Leiste).
+ *
+ * Deshalb hier: Quelle bleibt lesbar, gestrichen wird erst beim Senden.
+ * Beim Besucher kommt Zeichen fuer Zeichen dasselbe an.
+ */
+function rfat_minify_style_tags($html) {
+    $muster = '#(' . '<style' . '[^>]*>)(.*?)(' . '</style' . '>)#s';
+    return preg_replace_callback($muster, function ($m) {
+        $css = preg_replace('#/\*.*?\*/#s', '', $m[2]);      // Kommentare
+        $css = preg_replace('/\s+/', ' ', $css);              // Umbrueche
+        $css = preg_replace('/\s*([{}:;,])\s*/', '$1', $css);
+        $css = str_replace(';}', '}', $css);                  // letztes Semikolon
+        return $m[1] . trim($css) . $m[3];
+    }, $html);
+}
+
 function rfat_meta_blocklist() {
     return [
         '_edit_lock', '_edit_last', '_wp_old_slug', '_wp_old_date',
@@ -146,20 +171,20 @@ function rfat_analyse_booking($post_id) {
     $dt = null;
     $tz = wp_timezone();
     if ($combined_key !== null) {
-        $raw = get_post_meta($post_id, $combined_key, true);
+        $raw = isset($all_meta[$combined_key][0]) ? $all_meta[$combined_key][0] : '';
         $raw = str_replace('T', ' ', $raw);
         $dt = date_create($raw, $tz) ?: null;
         $result['datetime_field'] = ['type' => 'combined', 'key' => $combined_key];
     } elseif ($date_key !== null) {
-        $raw_date = get_post_meta($post_id, $date_key, true);
-        $raw_time = $time_key !== null ? get_post_meta($post_id, $time_key, true) : '00:00';
+        $raw_date = isset($all_meta[$date_key][0]) ? $all_meta[$date_key][0] : '';
+        $raw_time = ($time_key !== null && isset($all_meta[$time_key][0])) ? $all_meta[$time_key][0] : '00:00';
         $dt = date_create(trim($raw_date . ' ' . $raw_time), $tz) ?: null;
         $result['datetime_field'] = ['type' => 'split', 'date_key' => $date_key, 'time_key' => $time_key];
     }
     $result['datetime'] = $dt;
 
     if ($code_key !== null) {
-        $result['code'] = ['key' => $code_key, 'value' => get_post_meta($post_id, $code_key, true)];
+        $result['code'] = ['key' => $code_key, 'value' => isset($all_meta[$code_key][0]) ? $all_meta[$code_key][0] : ''];
     }
 
     $result['other'] = $other;
@@ -411,10 +436,18 @@ function rfat_render_overview_page() {
 
     $search = isset($_GET['s']) ? sanitize_text_field(wp_unslash($_GET['s'])) : '';
 
+    /*
+     * no_found_rows spart die Zaehl-Abfrage, der Term-Cache ist bei
+     * Buchungen ohne Kategorien ohnehin leer. Der Meta-Cache bleibt an -
+     * gleich darauf werden die Meta-Felder gebraucht.
+     */
     $posts = get_posts([
         'post_type'      => 'rc_booking',
         'post_status'    => ['publish', 'draft', 'pending', 'future'],
         'numberposts'    => -1,
+        'no_found_rows'          => true,
+        'update_post_meta_cache' => true,
+        'update_post_term_cache' => false,
     ]);
 
     $now = current_time('timestamp');
@@ -736,6 +769,25 @@ function rfat_find_booking_by_code($code) {
     if ($code === '') {
         return null;
     }
+
+    /*
+     * Die Selbstverwaltungs-Seite schlaegt denselben Code beim Laden,
+     * Stornieren und E-Mail-Speichern mehrfach nach. Gecacht wird nur die
+     * Zuordnung Code -> Post-ID; Beitrag und Analyse werden jedes Mal
+     * frisch geholt, damit Aenderungen sofort sichtbar sind.
+     */
+    $cache_key = 'rfat_lookup_' . md5($code);
+    $cached = get_transient($cache_key);
+    if (is_array($cached) && isset($cached['post_id'])) {
+        $post = get_post($cached['post_id']);
+        if ($post && $post->post_type === 'rc_booking' && $post->post_status !== 'trash') {
+            return [
+                'post'     => $post,
+                'analysis' => rfat_analyse_booking($post->ID),
+            ];
+        }
+        delete_transient($cache_key);   // Buchung ist weg
+    }
     /*
      * Direkt ueber _rc_code suchen statt jede Buchung zu laden und ihre
      * Felder zu untersuchen. Bei einer Handvoll Terminen fällt das nicht
@@ -749,6 +801,7 @@ function rfat_find_booking_by_code($code) {
         'meta_value'  => $code,
     ]);
     if ($posts) {
+        set_transient($cache_key, ['post_id' => $posts[0]->ID], MINUTE_IN_SECONDS);
         return ['post' => $posts[0], 'analysis' => rfat_analyse_booking($posts[0]->ID)];
     }
 
@@ -765,6 +818,7 @@ function rfat_find_booking_by_code($code) {
         $analysis = rfat_analyse_booking($p->ID);
         $found_code = $analysis['code']['value'] ?? '';
         if ($found_code !== '' && rfat_normalize_code($found_code) === $code) {
+            set_transient($cache_key, ['post_id' => $p->ID], MINUTE_IN_SECONDS);
             return ['post' => $p, 'analysis' => $analysis];
         }
     }
@@ -843,6 +897,32 @@ function rfat_public_booking_details_html($post, $analysis) {
     <?php
     return ob_get_clean();
 }
+
+/**
+ * Die beiden Caches verwerfen, sobald sich an einer Buchung etwas aendert.
+ *
+ * An den Ereignissen statt an den Aufrufstellen: Storniert wird an vier
+ * Stellen (Selbstverwaltung, Verschieben, Mail-Link, Papierkorb im
+ * Backend), und die fuenfte kommt bestimmt. Was am Hook haengt, kann beim
+ * naechsten Mal nicht vergessen werden.
+ */
+function rfat_caches_verwerfen($post_id, $post = null) {
+    $typ = $post instanceof WP_Post ? $post->post_type : get_post_type($post_id);
+    if ($typ !== 'rc_booking') {
+        return;
+    }
+    delete_transient('rfat_booked_slots');
+
+    $code = get_post_meta($post_id, '_rc_code', true);
+    if ($code !== '') {
+        delete_transient('rfat_lookup_' . md5(rfat_normalize_code($code)));
+    }
+}
+add_action('save_post_rc_booking', 'rfat_caches_verwerfen', 10, 2);
+add_action('trashed_post',       'rfat_caches_verwerfen', 10, 2);
+add_action('untrashed_post',     'rfat_caches_verwerfen', 10, 2);
+// Vor dem Loeschen, solange die Meta-Felder noch lesbar sind.
+add_action('before_delete_post', 'rfat_caches_verwerfen', 10, 2);
 
 add_shortcode('rfat_manage_booking', function ($atts) {
     if (!post_type_exists('rc_booking')) {
@@ -1022,6 +1102,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
     ob_start();
     ?>
     <div class="rfat-pub-wrap">
+        <?php ob_start(); ?>
         <style>
             .rfat-pub-wrap { max-width: 560px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
             .rfat-pub-notice { padding: 14px 18px; border-radius: 14px; margin-bottom: 18px; font-weight: 600; }
@@ -1118,6 +1199,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 box-shadow: 0 0 0 3px rgba(47, 125, 79, 0.15);
             }
         </style>
+        <?php echo rfat_minify_style_tags(ob_get_clean()); ?>
 
         <?php echo $notice; ?>
 
@@ -1336,6 +1418,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
  * ========================================================================= */
 add_action('wp_head', function () {
     ?>
+    <?php ob_start(); ?>
     <style id="rfat-responsive-css">
         /* Grundlegende Button-Optik – fluid: skaliert stufenlos zwischen mobil und Desktop */
         .btn {
@@ -1779,6 +1862,7 @@ add_action('wp_head', function () {
             }
         }
     </style>
+    <?php echo rfat_minify_style_tags(ob_get_clean()); ?>
     <?php
 }, 999);
 
@@ -3499,12 +3583,34 @@ if (!function_exists('rc_build_slots')) {
         return $slots;
     }
     function rc_booked_slot_ids() {
+        /*
+         * Welche Termine schon weg sind. Steht auf jeder Slot-Seite an,
+         * deshalb kurz gecacht. Zwei Minuten sind unkritisch: Der Cache
+         * wird beim Buchen und Stornieren sofort verworfen, und beim
+         * Anlegen prueft rc_create_booking ohnehin noch einmal direkt in
+         * der Datenbank - eine Doppelbuchung kann daraus also nicht
+         * entstehen, hoechstens ein kurz veralteter Anblick.
+         */
+        $cached = get_transient('rfat_booked_slots');
+        if (is_array($cached)) {
+            return $cached;
+        }
         $ids = array();
-        $q = get_posts(array('post_type'=>'rc_booking','numberposts'=>-1,'post_status'=>'publish','fields'=>'ids'));
+        $q = get_posts(array(
+            'post_type'   => 'rc_booking',
+            'numberposts' => -1,
+            'post_status' => 'publish',
+            'fields'      => 'ids',
+            'no_found_rows'          => true,
+            'update_post_term_cache' => false,
+            'meta_key'     => '_rc_slot',
+            'meta_compare' => 'EXISTS',
+        ));
         foreach ($q as $pid) {
             $s = get_post_meta($pid, '_rc_slot', true);
             if ($s) $ids[$s] = true;
         }
+        set_transient('rfat_booked_slots', $ids, 2 * MINUTE_IN_SECONDS);
         return $ids;
     }
 
@@ -3609,6 +3715,13 @@ if (!function_exists('rc_build_slots')) {
         update_post_meta($pid, '_rc_date', $slot['date']);
         update_post_meta($pid, '_rc_time', $slot['time']);
         if ($note !== '') update_post_meta($pid, '_rc_note', $note);
+
+        /*
+         * Zusaetzlich zum Hook oben: save_post feuert beim Anlegen, da ist
+         * _rc_slot aber noch nicht geschrieben. Zwischen beiden koennte ein
+         * anderer Aufruf den Cache ohne den neuen Termin neu aufbauen.
+         */
+        delete_transient('rfat_booked_slots');
 
         return array('ok' => true, 'code' => $code);
     }
@@ -3841,6 +3954,7 @@ if (!function_exists('rc_build_slots')) {
         $content = (string) get_post_field('post_content', get_queried_object_id());
         if (!has_shortcode($content, 'repairffm_booking')) return;
         ?>
+        <?php ob_start(); ?>
         <style>
           .rc-book{max-width:620px}
           .rc-h{margin:0 0 14px;font-size:22px}
@@ -3895,6 +4009,7 @@ if (!function_exists('rc_build_slots')) {
             .rc-btn{width:100%;text-align:center}
           }
         </style>
+        <?php echo rfat_minify_style_tags(ob_get_clean()); ?>
         <?php
     });
 
