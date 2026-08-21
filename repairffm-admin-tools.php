@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.8.5
+ * Version: 1.8.6
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -41,6 +41,7 @@ define('RFAT_NONCE_ACTION', 'rfat_save_booking');
 define('RFAT_EMAIL_META', '_rfat_email');
 define('RFAT_EMAIL_KEEP_META', '_rfat_email_keep');
 define('RFAT_CLEANUP_HOOK', 'rfat_cleanup_emails');
+define('RFAT_NOTIFIED_META', '_rfat_notified');
 
 // Internal WP core meta keys we never want to show/edit.
 function rfat_meta_blocklist() {
@@ -48,6 +49,7 @@ function rfat_meta_blocklist() {
         '_edit_lock', '_edit_last', '_wp_old_slug', '_wp_old_date',
         '_wp_page_template', '_thumbnail_id', '_wp_desired_post_slug',
         RFAT_STATUS_META, RFAT_EMAIL_META, RFAT_EMAIL_KEEP_META,
+        RFAT_NOTIFIED_META,
     ];
 }
 
@@ -683,6 +685,39 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         }
     }
 
+    /*
+     * Abmeldung über Link: /termin-abrufen/?abmelden=RC-AB12C
+     *
+     * Der Link darf nicht selbst schon löschen - Mailprogramme und
+     * Virenscanner rufen Links in Nachrichten ungefragt auf, und die
+     * Adresse wäre weg, bevor jemand sie bewusst entfernt hat. Deshalb
+     * zeigt der Link nur eine Frage, gelöscht wird per Knopfdruck.
+     */
+    $unsub_code = '';
+    if (!empty($_GET['abmelden'])) {
+        $unsub_code = sanitize_text_field(wp_unslash($_GET['abmelden']));
+    }
+
+    if (!empty($_POST['rfat_pub_action']) && $_POST['rfat_pub_action'] === 'unsubscribe'
+        && !empty($_POST['rfat_pub_code']) && !empty($_POST['_wpnonce'])) {
+        $ucode = sanitize_text_field(wp_unslash($_POST['rfat_pub_code']));
+        if (!wp_verify_nonce($_POST['_wpnonce'], 'rfat_pub_unsub_' . rfat_normalize_code($ucode))) {
+            $notice = '<div class="rfat-pub-notice rfat-pub-error">Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.</div>';
+        } else {
+            $um = rfat_find_booking_by_code($ucode);
+            if ($um) {
+                delete_post_meta($um['post']->ID, RFAT_EMAIL_META);
+                delete_post_meta($um['post']->ID, RFAT_EMAIL_KEEP_META);
+            }
+            /*
+             * Auch bei unbekanntem Code dieselbe Bestaetigung: Sonst
+             * verrät die Seite, welche Codes existieren.
+             */
+            $notice = '<div class="rfat-pub-notice rfat-pub-success">Erledigt. Zu diesem Code ist keine E-Mail-Adresse mehr gespeichert. Dein Termin bleibt unverändert bestehen.</div>';
+            $unsub_code = '';
+        }
+    }
+
     // Freiwillige E-Mail speichern oder entfernen.
     if (!empty($_POST['rfat_pub_action']) && $_POST['rfat_pub_action'] === 'email'
         && !empty($_POST['rfat_pub_code']) && !empty($_POST['_wpnonce'])) {
@@ -864,7 +899,27 @@ add_shortcode('rfat_manage_booking', function ($atts) {
 
         <?php echo $notice; ?>
 
-        <?php if (!$found): ?>
+        <?php if ($unsub_code !== ''): ?>
+            <div class="rfat-pub-card">
+                <p class="rfat-pub-eyebrow">E-Mail-Benachrichtigung</p>
+                <p class="rfat-pub-when" style="font-size:18px;">Adresse zu <?php echo esc_html(rfat_normalize_code($unsub_code)); ?> löschen?</p>
+                <p style="color:#5b6b62;font-size:14px;margin:10px 0 0;">
+                    Wir entfernen dann die hinterlegte E-Mail-Adresse. Du bekommst
+                    keine Nachrichten mehr. <strong>Dein Termin bleibt bestehen</strong> -
+                    abgesagt wird dadurch nichts.
+                </p>
+                <form method="post" style="margin-top:16px;">
+                    <?php wp_nonce_field('rfat_pub_unsub_' . rfat_normalize_code($unsub_code)); ?>
+                    <input type="hidden" name="rfat_pub_action" value="unsubscribe" />
+                    <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($unsub_code); ?>" />
+                    <button type="submit" class="btn">Ja, Adresse löschen</button>
+                </form>
+                <p style="margin:14px 0 0;font-size:13px;">
+                    <a href="<?php echo esc_url(add_query_arg('code', rfat_normalize_code($unsub_code), get_permalink())); ?>">Nein, zurück zu meinem Termin</a>
+                </p>
+            </div>
+
+        <?php elseif (!$found): ?>
             <form method="post">
                 <input type="hidden" name="rfat_pub_action" value="lookup" />
                 <p>
@@ -959,6 +1014,14 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 </form>
                 <button type="button" class="btn ghost" onclick="var el=document.getElementById('rfat-reschedule-<?php echo esc_js($post->ID); ?>'); el.style.display = el.style.display==='none' ? 'block' : 'none';">Termin verschieben</button>
             </div>
+
+            <?php if ($analysis['datetime']): ?>
+                <p style="margin:0 0 18px;">
+                    <a class="btn ghost" href="<?php echo esc_url(add_query_arg('ics', $norm_code, get_permalink())); ?>">
+                        &#128197; Zum Kalender hinzufügen
+                    </a>
+                </p>
+            <?php endif; ?>
 
             <div id="rfat-reschedule-<?php echo esc_attr($post->ID); ?>" class="rfat-pub-reschedule" style="display:none;">
                 <p><strong>So verschiebst du deinen Termin:</strong></p>
@@ -1552,6 +1615,167 @@ add_action('wp_footer', function () {
     </script>
     <?php
 }, 999);
+
+/* =========================================================================
+ * KALENDEREINTRAG (.ics)
+ *
+ * Ausgeliefert als echter Download unter ?ics=RC-XXXXX statt als data:-Link:
+ * iOS öffnet data:-URLs nicht im Kalender, eine ausgelieferte Datei mit
+ * text/calendar dagegen schon.
+ *
+ * Die Datei enthält bewusst nur Termin und Bereich - keine Adresse, keinen
+ * Namen. Was im Kalender landet, wandert oft in fremde Clouds.
+ * ========================================================================= */
+
+/**
+ * Zeilen nach RFC 5545 falten (max. 75 Oktette) und Sonderzeichen schützen.
+ */
+function rfat_ics_line($name, $value) {
+    $value = str_replace(["\\", "\n", ";", ","], ["\\\\", "\\n", "\\;", "\\,"], $value);
+    $line  = $name . ':' . $value;
+
+    $out = '';
+    while (strlen($line) > 73) {
+        $out .= substr($line, 0, 73) . "\r\n ";
+        $line = substr($line, 73);
+    }
+    return $out . $line . "\r\n";
+}
+
+add_action('template_redirect', function () {
+    if (empty($_GET['ics'])) {
+        return;
+    }
+    $code  = sanitize_text_field(wp_unslash($_GET['ics']));
+    $match = rfat_find_booking_by_code($code);
+    if (!$match) {
+        return; // Kein Treffer: Seite lädt normal weiter.
+    }
+
+    $analysis = $match['analysis'];
+    $dt       = $analysis['datetime'];
+    if (!$dt) {
+        return;
+    }
+
+    $start = $dt->getTimestamp();
+    $end   = $start + HOUR_IN_SECONDS;
+    $norm  = rfat_normalize_code($analysis['code']['value']);
+
+    $bereich = '';
+    foreach ($analysis['other'] as $field) {
+        if (stripos($field['key'], 'cat') !== false) {
+            $bereich = rfat_friendly_category($field['value']);
+            break;
+        }
+    }
+
+    $title = $bereich !== ''
+        ? 'Reparaturtermin - ' . $bereich
+        : 'Reparaturtermin';
+
+    $ics  = "BEGIN:VCALENDAR\r\n";
+    $ics .= "VERSION:2.0\r\n";
+    $ics .= "PRODID:-//Repair FfM//Terminbuchung//DE\r\n";
+    $ics .= "CALSCALE:GREGORIAN\r\n";
+    $ics .= "METHOD:PUBLISH\r\n";
+    $ics .= "BEGIN:VEVENT\r\n";
+    $ics .= rfat_ics_line('UID', $norm . '@' . wp_parse_url(home_url(), PHP_URL_HOST));
+    $ics .= rfat_ics_line('DTSTAMP', gmdate('Ymd\THis\Z'));
+    $ics .= rfat_ics_line('DTSTART', gmdate('Ymd\THis\Z', $start));
+    $ics .= rfat_ics_line('DTEND', gmdate('Ymd\THis\Z', $end));
+    $ics .= rfat_ics_line('SUMMARY', $title);
+    $ics .= rfat_ics_line('DESCRIPTION', 'Buchungscode ' . $norm . '. Termin ansehen, verschieben oder absagen: ' . home_url('/termin-abrufen/?code=' . rawurlencode($norm)));
+    $ics .= rfat_ics_line('URL', home_url('/termin-abrufen/?code=' . rawurlencode($norm)));
+    $ics .= "BEGIN:VALARM\r\n";
+    $ics .= "TRIGGER:-PT2H\r\n";
+    $ics .= "ACTION:DISPLAY\r\n";
+    $ics .= rfat_ics_line('DESCRIPTION', 'Erinnerung: ' . $title);
+    $ics .= "END:VALARM\r\n";
+    $ics .= "END:VEVENT\r\n";
+    $ics .= "END:VCALENDAR\r\n";
+
+    nocache_headers();
+    header('Content-Type: text/calendar; charset=utf-8');
+    header('Content-Disposition: attachment; filename="reparaturtermin-' . $norm . '.ics"');
+    header('Content-Length: ' . strlen($ics));
+    echo $ics;
+    exit;
+});
+
+/* =========================================================================
+ * BENACHRICHTIGUNG BEI NEUER BUCHUNG
+ *
+ * Weil zu einer Buchung keine Kontaktdaten gehören, kann niemand von sich
+ * aus nachfragen - die Werkstatt erfährt von einem Termin nur, wenn sie in
+ * die Übersicht schaut. Diese Mail schließt die Lücke.
+ *
+ * Sie geht an die Administrations-Adresse der Seite. Eine andere lässt sich
+ * über den Filter 'rfat_notify_recipient' setzen.
+ * ========================================================================= */
+
+/**
+ * Kurzfassung einer Buchung für die Benachrichtigung.
+ *
+ * @param int $post_id
+ * @return string
+ */
+function rfat_booking_summary($post_id) {
+    $analysis = rfat_analyse_booking($post_id);
+    $ts       = $analysis['datetime'] ? $analysis['datetime']->getTimestamp() : null;
+
+    $lines = [];
+    $lines[] = 'Termin:  ' . ($ts ? wp_date('l, d.m.Y', $ts) . ' um ' . wp_date('H:i', $ts) . ' Uhr' : 'unbekannt');
+
+    foreach ($analysis['other'] as $field) {
+        if (stripos($field['key'], 'cat') !== false) {
+            $lines[] = 'Bereich: ' . rfat_friendly_category($field['value']);
+            break;
+        }
+    }
+
+    $lines[] = 'Code:    ' . ($analysis['code']['value'] ?? '-');
+
+    return implode("\n", $lines);
+}
+
+/**
+ * Mail verschicken, sobald eine Buchung angelegt wurde.
+ *
+ * Hängt an wp_after_insert_post statt an save_post: Zu diesem Zeitpunkt sind
+ * die Meta-Felder bereits geschrieben, vorher stünde in der Mail nur ein
+ * leeres Gerüst.
+ */
+add_action('wp_after_insert_post', function ($post_id, $post, $update) {
+    if ($update || !($post instanceof WP_Post) || $post->post_type !== 'rc_booking') {
+        return;
+    }
+    if (wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) {
+        return;
+    }
+    if (!in_array($post->post_status, ['publish', 'draft', 'pending', 'private'], true)) {
+        return;
+    }
+
+    // Doppelte Mails ausschließen, falls der Hook mehrfach durchläuft.
+    if (get_post_meta($post_id, RFAT_NOTIFIED_META, true)) {
+        return;
+    }
+    update_post_meta($post_id, RFAT_NOTIFIED_META, '1');
+
+    $to = apply_filters('rfat_notify_recipient', get_option('admin_email'));
+    if (!$to || !is_email($to)) {
+        return;
+    }
+
+    $overview = admin_url('edit.php?post_type=rc_booking&page=rfat-overview');
+    $body = "Es wurde ein neuer Termin gebucht.\n\n"
+          . rfat_booking_summary($post_id) . "\n\n"
+          . "Übersicht öffnen:\n" . $overview . "\n\n"
+          . "-- \nAutomatische Nachricht von " . get_bloginfo('name');
+
+    wp_mail($to, sprintf('[%s] Neue Terminbuchung', get_bloginfo('name')), $body);
+}, 20, 3);
 
 /* =========================================================================
  * AUFRÄUMEN DER FREIWILLIGEN E-MAIL-ADRESSEN
