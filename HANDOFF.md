@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.11.0
+Stand: 21.08.2026 · Plugin-Version 1.12.0
 
 ---
 
@@ -311,6 +311,7 @@ Versionssprung zum ersten Mal.
 | 1.9.7 | Versionsnummer günstig gelesen statt `get_plugin_data()` bei jedem Aufruf |
 | 1.10.0 | Echte Meta-Keys des Buchungs-Plugins statt Raten |
 | 1.11.0 | **Buchung ist eine echte Seite** — Popup, Overlay-CSS und MutationObserver entfernt |
+| 1.12.0 | **Buchung ins Plugin geholt** — aktualisiert sich über GitHub; Schrittanzeige; Einleitung ab Schritt 2 aus |
 
 ---
 
@@ -514,6 +515,56 @@ bleibt vollständig.
 > mu-Plugin setzt dafür `nocache_headers()`, sobald der Shortcode auf der
 > Seite steht. Kommt ein Caching-Plugin dazu, muss `/termin-buchen/`
 > ausgenommen werden.
+
+### Die Buchung wohnt im Plugin — nicht mehr im mu-Plugin (ab 1.12.0)
+
+mu-Plugins kennt der WordPress-Updater nicht: keine Version, kein Eintrag
+unter „Plugins", kein Update-Knopf. Jede Änderung am Buchungsablauf musste
+von Hand auf den Umbrel-Server kopiert werden.
+
+Am 21.08.2026 hat sich gezeigt, warum das nicht trägt. Das Begleit-Plugin
+zog sich nach dem Merge selbst von GitHub und ließ dabei den JavaScript-
+Behelf fallen, der das E-Mail-Feld ins alte Popup schob. Das mu-Plugin lag
+noch unverändert auf dem Server. Ergebnis: altes Popup, aber ohne Feld.
+Zwei Hälften, zwei Aktualisierungswege, eine davon vergessen.
+
+Seit 1.12.0 steht der komplette Buchungsablauf in
+`repairffm-admin-tools.php` und fährt im selben Zug wie alles andere mit.
+
+**Der Schalter für die Umstellung:**
+
+```php
+if (!function_exists('rc_build_slots')) {
+    // ... kompletter Buchungsablauf ...
+}
+```
+
+Liegt das alte mu-Plugin noch auf dem Server, hat es Vorrang (mu-Plugins
+laden zuerst) und der Block bleibt still — sonst gäbe es einen Fatal Error
+durch doppelt deklarierte Funktionen. Erst wenn
+`/wp-content/mu-plugins/repairffm-core.php` gelöscht ist, übernimmt das
+Plugin. **Die Reihenfolge spielt dadurch keine Rolle**, und ein
+versehentlich zurückgespieltes mu-Plugin legt die Seite nicht lahm.
+
+> Der Preis: Wird `repairffm-admin-tools` deaktiviert, ist auch die Buchung
+> weg — der Custom Post Type `rc_booking` wird dann nicht mehr registriert
+> und vorhandene Buchungen sind im Backend unsichtbar. Gelöscht ist nichts,
+> sie tauchen beim Aktivieren wieder auf. Vorher hielt das mu-Plugin das
+> offen, weil es sich nicht abschalten ließ.
+
+**Übersichtlichkeit der Buchungsseite** (gleiche Version):
+
+- Schrittanzeige „Was → Wann → Abschicken"; auf schmalen Displays bleibt
+  nur der aktive Schritt beschriftet
+- Der Einleitungstext der Seite wird ab Schritt 2 ausgeblendet. Er steht im
+  Seiten-Editor und bleibt dort bearbeitbar — auf der Fertig-Seite forderte
+  er aber zum Aussuchen auf, obwohl längst gebucht war. Gelöst über einen
+  `the_content`-Filter, der alles vor dem Shortcode wegschneidet, sobald
+  `?was`, `?wann` oder `?code` in der Adresse steht.
+- Der Haken auf der Fertig-Seite ist gezeichnet statt ✅ — das Emoji kam auf
+  iOS als klobiger grüner Kasten.
+
+---
 
 ---
 
