@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.8.7
+ * Version: 1.8.9
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1494,6 +1494,85 @@ add_action('wp_head', function () {
         .rfat-rc-open .rfat-nav-open {
             display: none !important;
         }
+
+        /* Statusvermerk im Seitenfuß */
+        .rfat-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 7px;
+            padding: 14px 16px 20px;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #7d8b81;
+            flex-wrap: wrap;
+        }
+        .rfat-status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #2f7d4f;
+            flex-shrink: 0;
+            /* Ein schwacher Hof macht den Punkt auf kleinen Displays
+               erkennbar, ohne dass er sich in den Vordergrund draengt. */
+            box-shadow: 0 0 0 3px rgba(47, 125, 79, .16);
+        }
+        .rfat-status-dot.is-warn {
+            background: #c08a1e;
+            box-shadow: 0 0 0 3px rgba(192, 138, 30, .18);
+        }
+        .rfat-status-sep { opacity: .5; }
+        .rfat-status-version { font-variant-numeric: tabular-nums; }
+
+        /* Block, den wir nach der Buchung in den fremden Dialog hängen */
+        .rfat-after-booking {
+            margin: 18px 0;
+            padding: 16px 18px;
+            border: 1px solid #dbe6df;
+            border-radius: 16px;
+            background: #f4f8f5;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            text-align: left;
+        }
+        .rfat-ab-head {
+            margin: 0 0 6px;
+            font-size: 15px;
+            font-weight: 700;
+            color: #1c2a22;
+        }
+        .rfat-ab-text {
+            margin: 0 0 14px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #5b6b62;
+        }
+        .rfat-ab-row { display: flex; flex-direction: column; gap: 8px; }
+        .rfat-ab-btn {
+            display: block;
+            box-sizing: border-box;
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 11px;
+            background: #2f7d4f;
+            color: #fff !important;
+            font-size: 15px;
+            font-weight: 700;
+            text-align: center;
+            text-decoration: none !important;
+        }
+        .rfat-ab-btn:hover,
+        .rfat-ab-btn:focus-visible { background: #256a42; }
+        .rfat-ab-ghost {
+            background: transparent;
+            color: #2f7d4f !important;
+            border: 2px solid #2f7d4f;
+        }
+        .rfat-ab-ghost:hover,
+        .rfat-ab-ghost:focus-visible {
+            background: #e8f1eb;
+            color: #1f5a38 !important;
+        }
         /* Eingeloggt verdeckt die Adminleiste sonst den oberen Rand */
         body.admin-bar .rc-overlay {
             padding-top: max(62px, env(safe-area-inset-top));
@@ -1524,6 +1603,7 @@ add_action('wp_footer', function () {
     ?>
     <script id="rfat-btn-cleanup">
     window.rfatShowDiag = <?php echo $show_diag; ?>;
+    var rfatManageUrl = <?php echo wp_json_encode(home_url('/termin-abrufen/')); ?>;
     (function () {
         var b = document.getElementById('rc-open');
         if (b) { b.textContent = b.textContent.replace(/[\u{1F4C5}\u{FE0F}]/gu, '').trim(); }
@@ -1548,14 +1628,48 @@ add_action('wp_footer', function () {
          * sichtbar ist. Das funktioniert auch, wenn der Dialog über einen
          * Weg geschlossen wird, den wir nicht kennen.
          */
-        function rcOverlay() {
-            var el = document.querySelector('.rc-overlay');
-            if (!el) { return null; }
+        function rcVisible(el) {
+            if (!el) { return false; }
             var cs = window.getComputedStyle(el);
-            if (cs.display === 'none' || cs.visibility === 'hidden' || el.offsetParent === null) {
-                return null;
+            if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') {
+                return false;
             }
-            return el;
+            var r = el.getBoundingClientRect();
+            return r.width > 0 && r.height > 0;
+        }
+
+        /*
+         * Den offenen Buchungsdialog finden.
+         *
+         * Zuerst über die aus dem HTML rekonstruierte Klasse .rc-overlay.
+         * Trifft die nicht — der Screenshot vom 21.08. legt nahe, dass sie
+         * anders heißt —, wird nach der Bauform gesucht: ein sichtbares,
+         * fest positioniertes Kind von <body>, das den Bildschirm ausfüllt.
+         * So sieht ein Modal aus, egal wie seine Klasse heißt.
+         *
+         * Nur direkte Kinder von <body> werden geprüft; dort hängen Overlays
+         * praktisch immer, und die Liste ist kurz genug für jeden Frame.
+         */
+        function rcOverlay() {
+            var named = document.querySelector('.rc-overlay');
+            if (rcVisible(named)) { return named; }
+
+            var kids = document.body.children;
+            for (var i = 0; i < kids.length; i++) {
+                var el = kids[i];
+                if (el.id && el.id.indexOf('rfat') === 0) { continue; }   // unsere eigenen
+                if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') { continue; }
+                if (!rcVisible(el)) { continue; }
+
+                var cs = window.getComputedStyle(el);
+                if (cs.position !== 'fixed' && cs.position !== 'absolute') { continue; }
+
+                var r = el.getBoundingClientRect();
+                if (r.width >= window.innerWidth * 0.75 && r.height >= window.innerHeight * 0.4) {
+                    return el;
+                }
+            }
+            return null;
         }
 
         var rcWasOpen = false;
@@ -1587,6 +1701,81 @@ add_action('wp_footer', function () {
             });
         }
         rcSync();
+
+        /*
+         * Nach der Buchung: Weg zum eigenen Termin anbieten.
+         *
+         * Der Bestätigungsschritt gehört dem Kern-Plugin, das wir nicht
+         * anfassen. Erkannt wird er deshalb nicht an Klassennamen, sondern am
+         * Buchungscode selbst: Das Muster RC-XXXXX steht sichtbar im Dialog
+         * und ändert sich nicht, egal wie das Plugin seine Elemente nennt.
+         *
+         * Eingehängt wird vor "Weiteren Termin buchen", sonst am Ende des
+         * Dialogs. Angefasst wird nichts Bestehendes — nur ein Element
+         * danebengesetzt, damit die fremde Logik unberührt bleibt.
+         */
+        function rcAfterBooking() {
+            var existing = document.getElementById('rfat-after-booking');
+            var ov = rcOverlay();
+
+            if (!ov) {
+                if (existing) { existing.parentNode.removeChild(existing); }
+                return;
+            }
+
+            var match = (ov.textContent || '').match(/RC-[A-Z0-9]{4,}/i);
+            if (!match) {
+                if (existing) { existing.parentNode.removeChild(existing); }
+                return;
+            }
+
+            var code = match[0].toUpperCase();
+            if (existing) {
+                if (existing.getAttribute('data-code') === code) { return; }
+                existing.parentNode.removeChild(existing);
+            }
+
+            var box = document.createElement('div');
+            box.id = 'rfat-after-booking';
+            box.className = 'rfat-after-booking';
+            box.setAttribute('data-code', code);
+
+            var head = document.createElement('p');
+            head.className = 'rfat-ab-head';
+            head.textContent = 'Termin verwalten';
+            box.appendChild(head);
+
+            var intro = document.createElement('p');
+            intro.className = 'rfat-ab-text';
+            intro.textContent = 'Über diesen Link kommst du jederzeit zu deinem Termin '
+                + 'zurück — verschieben, absagen, oder freiwillig eine E-Mail '
+                + 'hinterlegen, wenn du benachrichtigt werden möchtest.';
+            box.appendChild(intro);
+
+            var row = document.createElement('div');
+            row.className = 'rfat-ab-row';
+
+            var manage = document.createElement('a');
+            manage.className = 'rfat-ab-btn';
+            manage.href = rfatManageUrl + '?code=' + encodeURIComponent(code);
+            manage.textContent = 'Termin bearbeiten & E-Mail hinterlegen';
+            row.appendChild(manage);
+
+            var cal = document.createElement('a');
+            cal.className = 'rfat-ab-btn rfat-ab-ghost';
+            cal.href = rfatManageUrl + '?ics=' + encodeURIComponent(code);
+            cal.textContent = 'Zum Kalender hinzufügen';
+            row.appendChild(cal);
+
+            box.appendChild(row);
+
+            var again = ov.querySelector('#rc-again');
+            if (again && again.parentNode) {
+                again.parentNode.insertBefore(box, again);
+            } else {
+                (ov.firstElementChild || ov).appendChild(box);
+            }
+        }
 
         /*
          * Sichtbare Diagnose – nur für angemeldete Redakteure.
@@ -1665,6 +1854,93 @@ add_action('wp_footer', function () {
     </script>
     <?php
 }, 999);
+
+/* =========================================================================
+ * STATUSVERMERK IM SEITENFUSS
+ *
+ * Ein Punkt, der immer grün leuchtet, ist Dekoration und irgendwann eine
+ * Lüge. Dieser prüft drei Dinge, die tatsächlich ausfallen können:
+ *
+ *   1. Ist die Buchung überhaupt da? (rc_booking des Kern-Plugins)
+ *   2. Läuft der tägliche Auftrag, der E-Mail-Adressen löscht?
+ *   3. Würde eine Benachrichtigung jemanden erreichen?
+ *
+ * Fällt eines aus, wird der Punkt gelb. Punkt 2 hat rechtliches Gewicht —
+ * ohne den Auftrag bleiben Adressen liegen, die längst gelöscht sein
+ * müssten; das darf nicht unbemerkt passieren.
+ *
+ * Ergebnis fünf Minuten im Transient, damit der Fuß keine Last erzeugt.
+ * ========================================================================= */
+
+/**
+ * Zustand der Dienste ermitteln.
+ *
+ * @return array{ok:bool,checks:array<string,bool>}
+ */
+function rfat_service_status() {
+    $cached = get_transient('rfat_status');
+    if (is_array($cached)) {
+        return $cached;
+    }
+
+    $checks = [
+        'Buchungssystem'  => post_type_exists('rc_booking'),
+        'Datenlöschung'  => (bool) wp_next_scheduled(RFAT_CLEANUP_HOOK),
+        'Benachrichtigung' => (bool) rfat_notify_recipients(),
+    ];
+
+    $status = [
+        'ok'     => !in_array(false, $checks, true),
+        'checks' => $checks,
+    ];
+
+    set_transient('rfat_status', $status, 5 * MINUTE_IN_SECONDS);
+
+    return $status;
+}
+
+/**
+ * Version aus dem eigenen Plugin-Kopf lesen.
+ */
+function rfat_plugin_version() {
+    if (!function_exists('get_plugin_data')) {
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    }
+    $data = get_plugin_data(__FILE__, false, false);
+    return $data['Version'] ?? '';
+}
+
+// Nach einer Änderung an den Empfängern soll der Fuß sofort stimmen.
+add_action('update_option_' . RFAT_NOTIFY_OPTION, function () {
+    delete_transient('rfat_status');
+});
+
+add_action('wp_footer', function () {
+    if (is_admin()) {
+        return;
+    }
+    $status  = rfat_service_status();
+    $version = rfat_plugin_version();
+
+    $failed = array_keys(array_filter($status['checks'], function ($v) { return !$v; }));
+    $label  = $status['ok'] ? 'Alle Dienste laufen' : 'Eingeschränkt';
+
+    // Nur Angemeldete sehen, WAS klemmt — Besucher geht das nichts an.
+    $detail = '';
+    if (!$status['ok'] && current_user_can('manage_options')) {
+        $detail = ' (' . implode(', ', $failed) . ')';
+    }
+    ?>
+    <div class="rfat-status" role="status">
+        <span class="rfat-status-dot<?php echo $status['ok'] ? '' : ' is-warn'; ?>" aria-hidden="true"></span>
+        <span><?php echo esc_html($label . $detail); ?></span>
+        <?php if ($version !== ''): ?>
+            <span class="rfat-status-sep" aria-hidden="true">&middot;</span>
+            <span class="rfat-status-version">v<?php echo esc_html($version); ?></span>
+        <?php endif; ?>
+    </div>
+    <?php
+}, 1001);
 
 /* =========================================================================
  * KALENDEREINTRAG (.ics)
