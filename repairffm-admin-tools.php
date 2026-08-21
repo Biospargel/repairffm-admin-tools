@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.9.0
+ * Version: 1.9.1
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -305,6 +305,29 @@ add_action('admin_init', function () {
         exit;
     }
 
+    if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'test_notify') {
+        if (!current_user_can('manage_options')
+            || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_test_notify')) {
+            wp_die('Sicherheitsprüfung fehlgeschlagen.');
+        }
+        $to = rfat_notify_recipients();
+        if ($to) {
+            rfat_send_logged(
+                $to,
+                sprintf('[%s] Testmail', get_bloginfo('name')),
+                "Das ist eine Testmail aus der Buchungsübersicht.\n\n"
+                . "Kommt sie an, funktioniert der Versand. Kommt trotzdem bei einer\n"
+                . "echten Buchung nichts, liegt es nicht am Mailversand, sondern\n"
+                . "daran, dass die Benachrichtigung nicht ausgelöst wird.\n\n"
+                . "-- \n" . get_bloginfo('name')
+            );
+        } else {
+            rfat_log_notify(false, [], 'Keine gültige Empfängeradresse hinterlegt.');
+        }
+        wp_safe_redirect(add_query_arg('rfat_tested', '1', wp_get_referer() ?: admin_url()));
+        exit;
+    }
+
     if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'trash' && isset($_POST['post_id'])) {
         $post_id = (int) $_POST['post_id'];
         if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_trash_' . $post_id)) {
@@ -390,6 +413,9 @@ function rfat_render_overview_page() {
         <?php if (isset($_GET['rfat_trashed'])): ?>
             <div class="notice notice-success is-dismissible"><p>Buchung in den Papierkorb verschoben.</p></div>
         <?php endif; ?>
+        <?php if (isset($_GET['rfat_tested'])): ?>
+            <div class="notice notice-info is-dismissible"><p>Testmail ausgelöst — Ergebnis siehe unten.</p></div>
+        <?php endif; ?>
         <?php if (isset($_GET['rfat_notify_saved'])): ?>
             <div class="notice notice-success is-dismissible"><p>Empfänger gespeichert.</p></div>
         <?php endif; ?>
@@ -417,6 +443,35 @@ function rfat_render_overview_page() {
                         <strong style="color:#b3402f;">Derzeit geht keine Mail raus</strong> - keine gültige Adresse hinterlegt.
                     <?php endif; ?>
                     Mehrere Adressen durch Komma trennen.
+                </span>
+            </form>
+
+            <?php
+            $log = get_option('rfat_notify_log');
+            ?>
+            <form method="post" style="margin:10px 0 0;">
+                <?php wp_nonce_field('rfat_test_notify'); ?>
+                <input type="hidden" name="rfat_action" value="test_notify" />
+                <button type="submit" class="button">Testmail senden</button>
+                <span class="description" style="margin-left:8px;">
+                    <?php if (!is_array($log) || empty($log['time'])): ?>
+                        <strong>Bisher wurde nie eine Mail versucht.</strong>
+                        Kam nach einer echten Buchung nichts an, wird die Benachrichtigung
+                        gar nicht ausgelöst — dann liegt es nicht am Mailversand.
+                    <?php else: ?>
+                        Letzter Versuch:
+                        <strong><?php echo esc_html(wp_date('d.m.Y H:i', $log['time'])); ?></strong>
+                        an <?php echo esc_html($log['to'] !== '' ? $log['to'] : '(niemanden)'); ?> —
+                        <?php if (!empty($log['ok'])): ?>
+                            <span style="color:#2f7d4f;font-weight:600;">vom Server angenommen</span>.
+                            Kommt trotzdem nichts an, wird sie unterwegs verworfen (Spam, SPF/DKIM).
+                        <?php else: ?>
+                            <span style="color:#b3402f;font-weight:600;">fehlgeschlagen</span>.
+                            <?php if (!empty($log['error'])): ?>
+                                <br /><code><?php echo esc_html($log['error']); ?></code>
+                            <?php endif; ?>
+                        <?php endif; ?>
+                    <?php endif; ?>
                 </span>
             </form>
         </div>
@@ -2254,12 +2309,18 @@ function rfat_notify_recipients() {
 /**
  * Mail verschicken, sobald eine Buchung angelegt wurde.
  *
- * Hängt an wp_after_insert_post statt an save_post: Zu diesem Zeitpunkt sind
- * die Meta-Felder bereits geschrieben, vorher stünde in der Mail nur ein
- * leeres Gerüst.
+ * Zwei Auslöser statt einem. wp_after_insert_post ist der richtige Ort —
+ * dort sind die Meta-Felder geschrieben. Ob das Kern-Plugin die Buchung
+ * aber so anlegt, dass dieser Hook überhaupt feuert, wissen wir nicht;
+ * seinen Quellcode haben wir nie gesehen. Deshalb zusätzlich save_post,
+ * ausgeführt erst beim shutdown, damit die Meta-Felder auch dann stehen.
+ *
+ * Doppelte Mails sind ausgeschlossen: Der erste Durchlauf setzt einen
+ * Vermerk am Post, der zweite bricht daran ab.
  */
-add_action('wp_after_insert_post', function ($post_id, $post, $update) {
-    if ($update || !($post instanceof WP_Post) || $post->post_type !== 'rc_booking') {
+function rfat_maybe_notify($post_id) {
+    $post = get_post($post_id);
+    if (!$post || $post->post_type !== 'rc_booking') {
         return;
     }
     if (wp_is_post_revision($post_id) || wp_is_post_autosave($post_id)) {
@@ -2268,8 +2329,6 @@ add_action('wp_after_insert_post', function ($post_id, $post, $update) {
     if (!in_array($post->post_status, ['publish', 'draft', 'pending', 'private'], true)) {
         return;
     }
-
-    // Doppelte Mails ausschließen, falls der Hook mehrfach durchläuft.
     if (get_post_meta($post_id, RFAT_NOTIFIED_META, true)) {
         return;
     }
@@ -2282,6 +2341,7 @@ add_action('wp_after_insert_post', function ($post_id, $post, $update) {
 
     $to = rfat_notify_recipients();
     if (!$to) {
+        rfat_log_notify(false, [], 'Keine gültige Empfängeradresse hinterlegt.');
         return;
     }
 
@@ -2293,8 +2353,64 @@ add_action('wp_after_insert_post', function ($post_id, $post, $update) {
           . "Übersicht öffnen:\n" . $overview . "\n\n"
           . "-- \nAutomatische Nachricht von " . get_bloginfo('name');
 
-    wp_mail($to, sprintf('[%s] Neue Terminanfrage', get_bloginfo('name')), $body);
+    rfat_send_logged($to, sprintf('[%s] Neue Terminanfrage', get_bloginfo('name')), $body);
+}
+
+add_action('wp_after_insert_post', function ($post_id, $post, $update) {
+    if ($update) {
+        return;
+    }
+    rfat_maybe_notify($post_id);
 }, 20, 3);
+
+/*
+ * Rückfallweg: Feuert wp_after_insert_post nicht, greift save_post. Der
+ * eigentliche Versand wartet bis zum shutdown, weil Meta-Felder oft erst
+ * nach save_post geschrieben werden - sonst stünde in der Mail ein
+ * leeres Gerüst ohne Termin und Code.
+ */
+add_action('save_post_rc_booking', function ($post_id) {
+    if (get_post_meta($post_id, RFAT_NOTIFIED_META, true)) {
+        return;
+    }
+    add_action('shutdown', function () use ($post_id) {
+        rfat_maybe_notify($post_id);
+    });
+}, 9999);
+
+/**
+ * wp_mail aufrufen und das Ergebnis festhalten.
+ *
+ * Ohne Protokoll lässt sich "es kommt keine Mail an" nicht auflösen:
+ * Man sieht nicht, ob der Auslöser nie lief oder der Server nicht
+ * zustellt. Das sind völlig verschiedene Probleme.
+ */
+function rfat_send_logged($to, $subject, $body) {
+    $error = '';
+    $catch = function ($wp_error) use (&$error) {
+        $error = $wp_error->get_error_message();
+    };
+    add_action('wp_mail_failed', $catch);
+
+    $ok = wp_mail($to, $subject, $body);
+
+    remove_action('wp_mail_failed', $catch);
+    rfat_log_notify($ok, (array) $to, $error);
+
+    return $ok;
+}
+
+/**
+ * Letzten Versandversuch festhalten.
+ */
+function rfat_log_notify($ok, $to, $error = '') {
+    update_option('rfat_notify_log', [
+        'time'  => time(),
+        'ok'    => (bool) $ok,
+        'to'    => implode(', ', $to),
+        'error' => (string) $error,
+    ], false);
+}
 
 /* =========================================================================
  * AUFRÄUMEN DER FREIWILLIGEN E-MAIL-ADRESSEN
