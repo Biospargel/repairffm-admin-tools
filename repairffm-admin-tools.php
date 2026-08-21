@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.9.6
+ * Version: 1.9.7
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -2390,11 +2390,32 @@ function rfat_service_status() {
  * Version aus dem eigenen Plugin-Kopf lesen.
  */
 function rfat_plugin_version() {
-    if (!function_exists('get_plugin_data')) {
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    static $version = null;
+    if ($version !== null) {
+        return $version;
     }
-    $data = get_plugin_data(__FILE__, false, false);
-    return $data['Version'] ?? '';
+
+    /*
+     * Bewusst NICHT get_plugin_data(): Das laedt wp-admin/includes/plugin.php
+     * ins Frontend und liest anschliessend die ganze Datei - inzwischen weit
+     * ueber 100 KB - fuer eine einzige Zeile. Der Statusvermerk im Seitenfuss
+     * steht auf jeder Seite, also lief das bei jedem Aufruf.
+     *
+     * Der Plugin-Kopf steht in den ersten Zeilen. Mehr als 8 KB zu lesen ist
+     * nie noetig; genau diese Grenze zieht WordPress intern auch.
+     */
+    $handle = @fopen(__FILE__, 'r');
+    if (!$handle) {
+        return $version = '';
+    }
+    $head = fread($handle, 8192);
+    fclose($handle);
+
+    $version = preg_match('/^[ \t\/*#@]*Version:\s*(.+)$/mi', (string) $head, $m)
+        ? trim($m[1])
+        : '';
+
+    return $version;
 }
 
 // Nach einer Änderung an den Empfängern soll der Fuß sofort stimmen.
