@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.8.6
+ * Version: 1.8.7
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -42,6 +42,8 @@ define('RFAT_EMAIL_META', '_rfat_email');
 define('RFAT_EMAIL_KEEP_META', '_rfat_email_keep');
 define('RFAT_CLEANUP_HOOK', 'rfat_cleanup_emails');
 define('RFAT_NOTIFIED_META', '_rfat_notified');
+define('RFAT_NOTIFY_OPTION', 'rfat_notify_to');
+define('RFAT_NOTIFY_DEFAULT', 'repair.ffm@outlook.com');
 
 // Internal WP core meta keys we never want to show/edit.
 function rfat_meta_blocklist() {
@@ -270,6 +272,24 @@ add_action('admin_init', function () {
         exit;
     }
 
+    if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'save_notify') {
+        if (!current_user_can('manage_options')
+            || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_save_notify')) {
+            wp_die('Sicherheitsprüfung fehlgeschlagen.');
+        }
+        $raw   = sanitize_text_field(wp_unslash($_POST['rfat_notify_to'] ?? ''));
+        $clean = [];
+        foreach (explode(',', $raw) as $candidate) {
+            $candidate = sanitize_email(trim($candidate));
+            if ($candidate !== '' && is_email($candidate)) {
+                $clean[] = $candidate;
+            }
+        }
+        update_option(RFAT_NOTIFY_OPTION, implode(', ', array_unique($clean)));
+        wp_safe_redirect(add_query_arg('rfat_notify_saved', '1', wp_get_referer() ?: admin_url()));
+        exit;
+    }
+
     if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'trash' && isset($_POST['post_id'])) {
         $post_id = (int) $_POST['post_id'];
         if (!wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_trash_' . $post_id)) {
@@ -355,6 +375,36 @@ function rfat_render_overview_page() {
         <?php if (isset($_GET['rfat_trashed'])): ?>
             <div class="notice notice-success is-dismissible"><p>Buchung in den Papierkorb verschoben.</p></div>
         <?php endif; ?>
+        <?php if (isset($_GET['rfat_notify_saved'])): ?>
+            <div class="notice notice-success is-dismissible"><p>Empfänger gespeichert.</p></div>
+        <?php endif; ?>
+
+        <?php
+        $notify_now   = rfat_notify_recipients();
+        $notify_value = get_option(RFAT_NOTIFY_OPTION, null);
+        if ($notify_value === null || trim((string) $notify_value) === '') {
+            $notify_value = RFAT_NOTIFY_DEFAULT;
+        }
+        ?>
+        <div class="notice notice-info" style="padding:12px 14px;">
+            <form method="post" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:0;">
+                <?php wp_nonce_field('rfat_save_notify'); ?>
+                <input type="hidden" name="rfat_action" value="save_notify" />
+                <label for="rfat_notify_to" style="font-weight:600;">Benachrichtigung bei neuer Buchung an</label>
+                <input type="text" id="rfat_notify_to" name="rfat_notify_to" class="regular-text"
+                       value="<?php echo esc_attr($notify_value); ?>"
+                       placeholder="<?php echo esc_attr(RFAT_NOTIFY_DEFAULT); ?>" />
+                <button type="submit" class="button">Speichern</button>
+                <span class="description" style="flex-basis:100%;margin-top:4px;">
+                    <?php if ($notify_now): ?>
+                        Mails gehen derzeit an <strong><?php echo esc_html(implode(', ', $notify_now)); ?></strong>.
+                    <?php else: ?>
+                        <strong style="color:#b3402f;">Derzeit geht keine Mail raus</strong> - keine gültige Adresse hinterlegt.
+                    <?php endif; ?>
+                    Mehrere Adressen durch Komma trennen.
+                </span>
+            </form>
+        </div>
 
         <h2 class="nav-tab-wrapper">
             <?php foreach (['kommende' => 'Kommende', 'vergangene' => 'Vergangene', 'alle' => 'Alle'] as $key => $label): ?>
@@ -1740,6 +1790,39 @@ function rfat_booking_summary($post_id) {
 }
 
 /**
+ * Empfänger der Benachrichtigung.
+ *
+ * Bewusst eine Einstellung und keine feste Adresse im Code: Wer die Mails
+ * bekommt, ändert sich mit den Leuten im Verein, nicht mit dem Plugin.
+ * Mehrere Adressen durch Komma trennen.
+ *
+ * @return string[] Geprüfte Adressen, möglicherweise leer.
+ */
+function rfat_notify_recipients() {
+    $raw = get_option(RFAT_NOTIFY_OPTION, null);
+    if ($raw === null || trim((string) $raw) === '') {
+        $raw = RFAT_NOTIFY_DEFAULT;
+    }
+
+    $list = [];
+    foreach (explode(',', (string) $raw) as $candidate) {
+        $candidate = trim($candidate);
+        if ($candidate !== '' && is_email($candidate)) {
+            $list[] = $candidate;
+        }
+    }
+
+    /**
+     * Letzte Gelegenheit, die Empfänger zu verändern.
+     *
+     * @param string[] $list
+     */
+    $list = apply_filters('rfat_notify_recipient', $list);
+
+    return array_values(array_unique(array_filter((array) $list, 'is_email')));
+}
+
+/**
  * Mail verschicken, sobald eine Buchung angelegt wurde.
  *
  * Hängt an wp_after_insert_post statt an save_post: Zu diesem Zeitpunkt sind
@@ -1763,8 +1846,8 @@ add_action('wp_after_insert_post', function ($post_id, $post, $update) {
     }
     update_post_meta($post_id, RFAT_NOTIFIED_META, '1');
 
-    $to = apply_filters('rfat_notify_recipient', get_option('admin_email'));
-    if (!$to || !is_email($to)) {
+    $to = rfat_notify_recipients();
+    if (!$to) {
         return;
     }
 
