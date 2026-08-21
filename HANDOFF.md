@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.9.6
+Stand: 21.08.2026 · Plugin-Version 1.11.0
 
 ---
 
@@ -308,6 +308,9 @@ Versionssprung zum ersten Mal.
 | 1.9.4 | Schließen-Button des Popups erreichbar (`.rc-close` bestätigt) |
 | 1.9.5 | Mail-Fehlermeldungen in Klartext |
 | 1.9.6 | Toter Funktionsaufruf behoben; nur noch Hamburger auf dem Handy; Dialogtext richtiggestellt |
+| 1.9.7 | Versionsnummer günstig gelesen statt `get_plugin_data()` bei jedem Aufruf |
+| 1.10.0 | Echte Meta-Keys des Buchungs-Plugins statt Raten |
+| 1.11.0 | **Buchung ist eine echte Seite** — Popup, Overlay-CSS und MutationObserver entfernt |
 
 ---
 
@@ -463,25 +466,54 @@ Datenschutzerklärung.
 - Startseite, Datenschutz und Impressum müssen vor dem Livegang stehen;
   fertige Texte lagen dem Betreiber am 21.08.2026 vor.
 
-### Buchungs-Popup → eigene Seite (Wunsch vom 21.08.2026)
+### Buchung als echte Seite — erledigt in 1.11.0
 
-Der X-Button des Buchungs-Modals ist auf dem Handy schwer erreichbar, das
-Feld zu groß. Gewünscht ist **kein Popup, sondern eine normale Seite**, die
-sich im Block-Editor bearbeiten lässt.
+Die Buchung war ein Popup: ein Overlay, das das mu-Plugin per JavaScript
+über die Seite legte, alle vier Schritte im selben Dokument. Solange der
+Quellcode fehlte, konnten wir nur von außen dagegenhalten — CSS gegen
+rekonstruierte Klassennamen, ein MutationObserver, der auf einen
+Buchungscode im Overlay wartete, um das E-Mail-Feld einzuhängen. Das hat
+funktioniert, war aber durchgehend Behelf.
 
-Das ist auch fachlich die bessere Lösung: kein Scroll-Lock, keine Fokusfalle,
-funktionierender Zurück-Button.
+Seit der Quellcode vorliegt (21.08.2026) ist jeder Schritt eine eigene
+Adresse:
 
-**Blockiert durch fehlenden Quellcode.** Das Modal kommt aus dem mu-Plugin.
-Bekannt sind nur die aus dem HTML rekonstruierten Klassen (`.rc-overlay`,
-`.rc-modal`, `#rc-open`, `#rc-confirm`, `#rc-again`) — **der Schließen-Button
-ist nicht darunter**. Blind CSS dafür zu schreiben ist genau der Fehler, der
-1.4.0–1.6.0 wirkungslos gemacht hat.
+```
+/termin-buchen/                      Kategorie wählen
+/termin-buchen/?was=it               freien Termin wählen
+/termin-buchen/?was=it&wann=<slot>   bestätigen  (Formular, POST)
+/termin-buchen/?code=RC-XXXXX        fertig
+```
 
-Als Zwischenschritt wurde ein CSS-Schnipsel zum Test in den Customizer
-gegeben (`max-height: 85vh` + `overflow-y: auto` auf `.rc-modal`). Wirkt es,
-stimmen die rekonstruierten Klassennamen; wirkt es nicht, sind sie falsch —
-beides ist ein verwertbarer Befund.
+Schritt 1 und 2 sind Links, Schritt 3 ist ein gewöhnliches Formular, danach
+wird weitergeleitet (Post/Redirect/Get — Neuladen bucht dadurch nicht
+doppelt). Zurück-Knopf, Lesezeichen und Weiterschicken funktionieren von
+selbst; die Buchung läuft ohne eine Zeile JavaScript.
+
+**Was dabei ersatzlos entfiel** (rund 470 Zeilen):
+
+- das Overlay-Markup und sein CSS im mu-Plugin
+- der AJAX-Endpunkt `rc_book` — es gibt keinen JavaScript-Aufrufer mehr
+- im Begleit-Plugin: der MutationObserver, `rcAfterBooking()`, die
+  Diagnose-Box, das CSS gegen `.rc-overlay` / `.rc-modal` / `.rc-close`
+  und die Regel, die den Menüknopf bei offenem Dialog ausblendete
+
+**Die Schnittstelle zwischen den beiden Plugins** ist jetzt ein Hook statt
+DOM-Beobachtung: Das mu-Plugin ruft am Ende
+
+```php
+do_action('repairffm_after_booking', $code, $post_id);
+```
+
+Das Begleit-Plugin hängt sich dort ein und gibt das freiwillige E-Mail-Feld
+als normales HTML aus. Ist es nicht aktiv, steht dort nichts — die Buchung
+bleibt vollständig.
+
+> **Achtung bei künftigen Änderungen:** Die Buchungsseite darf nicht
+> zwischengespeichert werden — sie zeigt, welche Termine frei sind. Das
+> mu-Plugin setzt dafür `nocache_headers()`, sobald der Shortcode auf der
+> Seite steht. Kommt ein Caching-Plugin dazu, muss `/termin-buchen/`
+> ausgenommen werden.
 
 ---
 

@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.10.0
+ * Version: 1.11.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1668,39 +1668,6 @@ add_action('wp_head', function () {
             }
         }
 
-        /* ============ Buchungs-Popup des Kern-Plugins entschärfen ============
-         * Das Modal kommt aus dem mu-Plugin, das wir nicht anfassen. Auf dem
-         * Handy lief es aus dem Bild, wodurch der Schließen-Button unerreichbar
-         * wurde. Statt den X-Button zu suchen (dessen Klasse wir nicht kennen),
-         * deckeln wir die Höhe und machen den Inhalt scrollbar — damit rückt
-         * er von selbst in Reichweite.
-         *
-         * Die Klassen sind seit 21.08.2026 bestätigt: Die Diagnose meldete
-         * .rc-overlay, .rc-modal und — bis dahin unbekannt — .rc-close für
-         * den Schließen-Button. Es wird hier also nichts mehr geraten. */
-        .rc-overlay {
-            align-items: flex-start;
-            /*
-             * Gescrollt wird das Overlay, nicht der Dialog. Beim Dialog
-             * scrollte der Schließen-Button mit nach oben aus dem Bild —
-             * genau die Klage vom 21.08. Bleibt das Overlay der
-             * Scroll-Bereich, kann der Button darüber stehen bleiben.
-             */
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-            padding: max(16px, env(safe-area-inset-top)) 12px
-                     max(16px, env(safe-area-inset-bottom));
-        }
-        .rc-modal {
-            box-sizing: border-box;
-        }
-
-        /* Solange der Buchungsdialog offen ist, hat unser Menüknopf dort
-         * nichts zu suchen — er lag sonst sichtbar über dem Dialog. */
-        .rfat-rc-open .rfat-nav-open {
-            display: none !important;
-        }
-
         /* Statusvermerk im Seitenfuß */
         .rfat-status {
             display: flex;
@@ -1783,6 +1750,8 @@ add_action('wp_head', function () {
         }
         .rfat-ab-keep input { margin-top: 2px; flex-shrink: 0; width: 17px; height: 17px; }
         .rfat-ab-hint { margin: 0 0 10px; font-size: 13px; color: #b3402f; }
+        .rfat-ab-cal { margin: 12px 0 0; font-size: 13px; text-align: center; }
+        .rfat-ab-cal a { color: #2f7d4f; font-weight: 600; }
         .rfat-ab-btn[disabled] { opacity: .65; cursor: default; }
 
         .rfat-ab-row { display: flex; flex-direction: column; gap: 8px; }
@@ -1812,47 +1781,6 @@ add_action('wp_head', function () {
             color: #1f5a38 !important;
         }
         /* Eingeloggt verdeckt die Adminleiste sonst den oberen Rand */
-        body.admin-bar .rc-overlay {
-            padding-top: max(62px, env(safe-area-inset-top));
-        }
-
-        /*
-         * Der Schließen-Button auf dem Handy.
-         *
-         * Ursprüngliche Klage: "kann ich nur sehr schwer schließen, weil der
-         * X-Button nicht gut erreichbar ist". Er stand klein am oberen Rand
-         * des Dialogs und rutschte beim Scrollen durch die Terminliste aus
-         * dem Bild. Fest am Fensterrand verankert bleibt er immer in
-         * Reichweite, unabhängig davon, wie weit man gescrollt hat.
-         *
-         * 46px sind mehr als die 44px, die Apple als kleinste sinnvolle
-         * Trefferfläche nennt.
-         */
-        @media (max-width: 600px) {
-            .rc-close {
-                position: fixed !important;
-                top: calc(12px + env(safe-area-inset-top));
-                right: 12px;
-                z-index: 10;
-                display: flex !important;
-                align-items: center;
-                justify-content: center;
-                width: 46px;
-                height: 46px;
-                padding: 0 !important;
-                margin: 0 !important;
-                border: 1px solid #cfd8d2 !important;
-                border-radius: 50% !important;
-                background: #fff !important;
-                color: #1c2a22 !important;
-                font-size: 24px !important;
-                line-height: 1 !important;
-                box-shadow: 0 2px 12px rgba(28, 42, 34, .22);
-            }
-            body.admin-bar .rc-close {
-                top: calc(58px + env(safe-area-inset-top));
-            }
-        }
 
         /* Ab sehr schmalen Screens: Aktions-Buttons stapeln statt quetschen */
         @media (max-width: 420px) {
@@ -1868,416 +1796,6 @@ add_action('wp_head', function () {
 }, 999);
 
 /*
- * Das 📅-Emoji im Buchungs-Button (kommt aus dem Kern-Buchungsplugin, das wir
- * nicht anfassen) wirkt auf iOS klobig — hier per unauffälligem Skript
- * entfernen, der Buttontext bleibt unverändert.
- */
-add_action('wp_footer', function () {
-    // Die Diagnose-Box unten ist ein Werkzeug für uns, kein Seiteninhalt —
-    // Besucher bekommen sie nie zu sehen.
-    /*
-     * Die Diagnose-Box hat am 21.08.2026 geliefert, wonach zweimal geraten
-     * wurde: .rc-overlay, .rc-modal und .rc-close. Damit ist ihr Zweck
-     * erfüllt — sie legte sich aber über den Dialog und soll deshalb
-     * nicht mehr bei jedem Öffnen erscheinen.
-     *
-     * Sie bleibt erhalten, weil die nächste unbekannte Struktur bestimmt
-     * kommt: mit ?rfat_diag=1 an der Adresse ist sie wieder da.
-     */
-    $show_diag = (current_user_can('manage_options') && !empty($_GET['rfat_diag']))
-        ? 'true' : 'false';
-    ?>
-    <script id="rfat-btn-cleanup">
-    window.rfatShowDiag = <?php echo $show_diag; ?>;
-    var rfatManageUrl = <?php echo wp_json_encode(home_url('/termin-abrufen/')); ?>;
-    var rfatAjax = <?php echo wp_json_encode([
-        'url'   => admin_url('admin-ajax.php'),
-        'nonce' => wp_create_nonce('rfat_save_email'),
-    ]); ?>;
-    (function () {
-        var b = document.getElementById('rc-open');
-        if (b) { b.textContent = b.textContent.replace(/[\u{1F4C5}\u{FE0F}]/gu, '').trim(); }
-
-        /*
-         * Diagnose für das Buchungs-Popup: Die Klassennamen .rc-overlay und
-         * .rc-modal sind aus dem gerenderten HTML rekonstruiert, nicht aus
-         * Quellcode. Ob unser CSS überhaupt etwas trifft, war deshalb bisher
-         * reine Vermutung. Nach dem Öffnen setzen wir eine Klasse auf <html>:
-         *
-         *   rfat-rc-ok      – .rc-modal existiert, unser CSS greift
-         *   rfat-rc-missing – Klasse heißt anders, das CSS läuft ins Leere
-         *
-         * Ein Blick in den Inspektor beantwortet damit eine Frage, die dieses
-         * Projekt schon mehrere wirkungslose Versionen gekostet hat.
-         */
-        /*
-         * Ist der Buchungsdialog gerade offen? Wir kennen weder seinen
-         * Schließen-Button noch seine genauen Klassen, deshalb wird der
-         * Zustand beobachtet statt an Klicks gekoppelt: Ein MutationObserver
-         * meldet jede Änderung, und geprüft wird, ob das Overlay tatsächlich
-         * sichtbar ist. Das funktioniert auch, wenn der Dialog über einen
-         * Weg geschlossen wird, den wir nicht kennen.
-         */
-        function rcVisible(el) {
-            if (!el) { return false; }
-            var cs = window.getComputedStyle(el);
-            if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') {
-                return false;
-            }
-            var r = el.getBoundingClientRect();
-            return r.width > 0 && r.height > 0;
-        }
-
-        /*
-         * Den offenen Buchungsdialog finden.
-         *
-         * Zuerst über die aus dem HTML rekonstruierte Klasse .rc-overlay.
-         * Trifft die nicht — der Screenshot vom 21.08. legt nahe, dass sie
-         * anders heißt —, wird nach der Bauform gesucht: ein sichtbares,
-         * fest positioniertes Kind von <body>, das den Bildschirm ausfüllt.
-         * So sieht ein Modal aus, egal wie seine Klasse heißt.
-         *
-         * Nur direkte Kinder von <body> werden geprüft; dort hängen Overlays
-         * praktisch immer, und die Liste ist kurz genug für jeden Frame.
-         */
-        function rcOverlay() {
-            var named = document.querySelector('.rc-overlay');
-            if (rcVisible(named)) { return named; }
-
-            var kids = document.body.children;
-            for (var i = 0; i < kids.length; i++) {
-                var el = kids[i];
-                if (el.id && el.id.indexOf('rfat') === 0) { continue; }   // unsere eigenen
-                if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE') { continue; }
-                if (!rcVisible(el)) { continue; }
-
-                var cs = window.getComputedStyle(el);
-                if (cs.position !== 'fixed' && cs.position !== 'absolute') { continue; }
-
-                var r = el.getBoundingClientRect();
-                if (r.width >= window.innerWidth * 0.75 && r.height >= window.innerHeight * 0.4) {
-                    return el;
-                }
-            }
-            return null;
-        }
-
-        var rcWasOpen = false;
-        function rcSync() {
-            var open = !!rcOverlay();
-            if (open === rcWasOpen) { return; }
-            rcWasOpen = open;
-            document.documentElement.classList.toggle('rfat-rc-open', open);
-            if (open) { rcReport(); }
-        }
-
-        /* Der Observer hängt am ganzen body und feuert entsprechend oft.
-         * Ohne Bremse liefe bei jeder Mutation ein getComputedStyle — deshalb
-         * wird die Prüfung auf höchstens einmal pro Frame gebündelt. */
-        var rcPending = false;
-        function rcQueue() {
-            if (rcPending) { return; }
-            rcPending = true;
-            window.requestAnimationFrame(function () {
-                rcPending = false;
-                rcSync();
-                /*
-                 * Getrennt von rcSync aufrufen, und zwar bei JEDER Mutation.
-                 *
-                 * rcSync bricht ab, wenn sich der Offen-Zustand nicht
-                 * geändert hat — richtig für den Menüknopf, falsch hier:
-                 * Das Overlay bleibt vom ersten Schritt bis zur Bestätigung
-                 * durchgehend offen. Der Buchungscode taucht erst am Ende
-                 * auf, also lange nach dem einzigen Zustandswechsel.
-                 *
-                 * Der Aufruf ist billig: Steht schon ein Block mit demselben
-                 * Code, kehrt die Funktion sofort zurück.
-                 */
-                rcAfterBooking();
-            });
-        }
-
-        if (window.MutationObserver) {
-            new MutationObserver(rcQueue).observe(document.body, {
-                childList: true, subtree: true, attributes: true,
-                attributeFilter: ['class', 'style', 'hidden']
-            });
-        }
-        rcSync();
-
-        /*
-         * Nach der Buchung: Weg zum eigenen Termin anbieten.
-         *
-         * Der Bestätigungsschritt gehört dem Kern-Plugin, das wir nicht
-         * anfassen. Erkannt wird er deshalb nicht an Klassennamen, sondern am
-         * Buchungscode selbst: Das Muster RC-XXXXX steht sichtbar im Dialog
-         * und ändert sich nicht, egal wie das Plugin seine Elemente nennt.
-         *
-         * Eingehängt wird vor "Weiteren Termin buchen", sonst am Ende des
-         * Dialogs. Angefasst wird nichts Bestehendes — nur ein Element
-         * danebengesetzt, damit die fremde Logik unberührt bleibt.
-         */
-        function rcAfterBooking() {
-            var existing = document.getElementById('rfat-after-booking');
-            var ov = rcOverlay();
-
-            if (!ov) {
-                if (existing) { existing.parentNode.removeChild(existing); }
-                return;
-            }
-
-            var match = (ov.textContent || '').match(/RC-[A-Z0-9]{4,}/i);
-            if (!match) {
-                if (existing) { existing.parentNode.removeChild(existing); }
-                return;
-            }
-
-            var code = match[0].toUpperCase();
-            rcRetext(ov);
-            if (existing) {
-                if (existing.getAttribute('data-code') === code) { return; }
-                existing.parentNode.removeChild(existing);
-            }
-
-            var box = document.createElement('div');
-            box.id = 'rfat-after-booking';
-            box.className = 'rfat-after-booking';
-            box.setAttribute('data-code', code);
-
-            var head = document.createElement('p');
-            head.className = 'rfat-ab-head';
-            head.textContent = 'Anfrage eingegangen';
-            box.appendChild(head);
-
-            var intro = document.createElement('p');
-            intro.className = 'rfat-ab-text';
-            /* Der Dialog des Kern-Plugins meldet "Termin gebucht!". Seit 1.9.0
-             * ist das eine Anfrage, die noch bestätigt werden muss - hier wird
-             * das richtiggestellt, solange wir an jenen Text nicht herankommen. */
-            intro.textContent = 'Wir sehen uns deine Anfrage an und bestätigen sie. '
-                + 'Magst du darüber benachrichtigt werden? Dann trag hier freiwillig '
-                + 'eine E-Mail ein — nötig ist sie nicht, dein Code genügt.';
-            box.appendChild(intro);
-
-            /* Adresse gleich hier abfragen statt erst auf der naechsten
-             * Seite: Wer den Bestaetigungsschritt wegklickt, kommt sonst
-             * nie dazu. Freiwillig bleibt es trotzdem - der Weg darunter
-             * fuehrt ohne Eingabe weiter. */
-            var mail = document.createElement('input');
-            mail.type = 'email';
-            mail.className = 'rfat-ab-input';
-            mail.placeholder = 'dein@beispiel.de (freiwillig)';
-            mail.setAttribute('aria-label', 'E-Mail-Adresse, freiwillig');
-            box.appendChild(mail);
-
-            var keepWrap = document.createElement('label');
-            keepWrap.className = 'rfat-ab-keep';
-            var keep = document.createElement('input');
-            keep.type = 'checkbox';
-            keepWrap.appendChild(keep);
-            var keepText = document.createElement('span');
-            keepText.textContent = 'Adresse darf auch nach dem Termin gespeichert bleiben. '
-                + 'Ohne Haken wird sie danach automatisch gelöscht.';
-            keepWrap.appendChild(keepText);
-            box.appendChild(keepWrap);
-
-            var hint = document.createElement('p');
-            hint.className = 'rfat-ab-hint';
-            box.appendChild(hint);
-
-            var row = document.createElement('div');
-            row.className = 'rfat-ab-row';
-
-            var save = document.createElement('button');
-            save.type = 'button';
-            save.className = 'rfat-ab-btn';
-            save.textContent = 'E-Mail speichern und weiter';
-            save.addEventListener('click', function () {
-                if (!mail.value) {
-                    hint.textContent = 'Bitte eine Adresse eingeben — oder unten ohne fortfahren.';
-                    mail.focus();
-                    return;
-                }
-                save.disabled = true;
-                save.textContent = 'Wird gespeichert …';
-                hint.textContent = '';
-
-                var body = 'action=rfat_save_email'
-                    + '&nonce=' + encodeURIComponent(rfatAjax.nonce)
-                    + '&code=' + encodeURIComponent(code)
-                    + '&email=' + encodeURIComponent(mail.value)
-                    + (keep.checked ? '&keep=1' : '');
-
-                fetch(rfatAjax.url, {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-                    credentials: 'same-origin',
-                    body: body
-                }).then(function (r) { return r.json(); }).then(function (res) {
-                    if (res && res.success && res.data && res.data.redirect) {
-                        window.location.href = res.data.redirect;
-                        return;
-                    }
-                    save.disabled = false;
-                    save.textContent = 'E-Mail speichern und weiter';
-                    hint.textContent = (res && res.data && res.data.message)
-                        ? res.data.message
-                        : 'Das hat nicht geklappt. Du kannst die Adresse auch auf der nächsten Seite eintragen.';
-                }).catch(function () {
-                    save.disabled = false;
-                    save.textContent = 'E-Mail speichern und weiter';
-                    hint.textContent = 'Keine Verbindung. Du kannst die Adresse auch auf der nächsten Seite eintragen.';
-                });
-            });
-            row.appendChild(save);
-
-            var manage = document.createElement('a');
-            manage.className = 'rfat-ab-btn rfat-ab-ghost';
-            manage.href = rfatManageUrl + '?code=' + encodeURIComponent(code);
-            manage.textContent = 'Ohne E-Mail weiter zum Termin';
-            row.appendChild(manage);
-
-            var cal = document.createElement('a');
-            cal.className = 'rfat-ab-btn rfat-ab-ghost';
-            cal.href = rfatManageUrl + '?ics=' + encodeURIComponent(code);
-            cal.textContent = 'Zum Kalender hinzufügen';
-            row.appendChild(cal);
-
-            box.appendChild(row);
-
-            var again = ov.querySelector('#rc-again');
-            if (again && again.parentNode) {
-                again.parentNode.insertBefore(box, again);
-            } else {
-                (ov.firstElementChild || ov).appendChild(box);
-            }
-        }
-
-        /*
-         * Zwei Sätze des Kern-Plugins richtigstellen.
-         *
-         * "Termin gebucht!" stimmt nicht mehr, seit Termine erst nach Zusage
-         * gelten. Und "Wir speichern keine Kontaktdaten" steht unmittelbar
-         * über unserem E-Mail-Feld — ein falsches Datenschutzversprechen an
-         * der denkbar schlechtesten Stelle.
-         *
-         * Beides gehört dem mu-Plugin, an dessen Datei wir nicht kommen.
-         * Also wird der Text beim Anzeigen ersetzt.
-         *
-         * Angefasst werden nur Elemente OHNE Kindelemente. Sonst könnte ein
-         * Austausch per textContent verschachtelte Inhalte mitreißen — etwa
-         * den Buchungscode, der in einem eigenen Element steckt.
-         */
-        function rcRetext(ov) {
-            var ersetzungen = [
-                [/Termin gebucht/i, 'Termin vorgemerkt'],
-                [/speichern keine Kontaktdaten/i,
-                 'Bitte warte noch auf unsere Bestätigung — erst dann steht dein '
-                 + 'Termin fest. Damit du das nicht verpasst, kannst du unten '
-                 + 'freiwillig deine E-Mail hinterlassen. Möchtest du anonym '
-                 + 'bleiben: Code notieren und jederzeit darüber zurückkommen.']
-            ];
-
-            /*
-             * Seit der Quellcode bekannt ist, lässt sich der Schritt genau
-             * benennen: Der Bestätigungsschritt ist [data-step="done"], der
-             * Hinweistext hat die Klasse .rc-hint. Zuvor wurde über alle
-             * Überschriften und Absätze gesucht und der Text verglichen.
-             */
-            var done = ov.querySelector('[data-step="done"]');
-            var nodes = (done || ov).querySelectorAll('h1, h2, h3, h4, p.rc-hint, p');
-            Array.prototype.forEach.call(nodes, function (el) {
-                if (el.children.length || el.getAttribute('data-rfat-retext')) {
-                    return;
-                }
-                var text = el.textContent || '';
-                for (var i = 0; i < ersetzungen.length; i++) {
-                    if (ersetzungen[i][0].test(text)) {
-                        el.textContent = ersetzungen[i][1];
-                        el.setAttribute('data-rfat-retext', '1');
-                        return;
-                    }
-                }
-            });
-        }
-
-        /*
-         * Sichtbare Diagnose – nur für angemeldete Redakteure.
-         *
-         * Die Klassennamen des Buchungsdialogs stammen aus dem gerenderten
-         * HTML und sind nicht durch Quellcode bestätigt; zweimal wurde
-         * deshalb CSS geschrieben, das ins Leere lief. Der Entwickler-
-         * Inspektor ist auf dem Handy praktisch nicht bedienbar, also zeigt
-         * diese Box die echte Struktur direkt auf dem Bildschirm an — ein
-         * Screenshot genügt, um die richtigen Selektoren zu erfahren.
-         *
-         * Für Besucher ist sie unsichtbar (siehe rfatShowDiag unten).
-         */
-        function rcReport() {
-            if (!window.rfatShowDiag) { return; }
-            var box = document.getElementById('rfat-diag');
-            if (!box) {
-                box = document.createElement('div');
-                box.id = 'rfat-diag';
-                box.setAttribute('style',
-                    'position:fixed;left:8px;right:8px;bottom:8px;z-index:100001;' +
-                    'background:#1c2a22;color:#fff;font:12px/1.45 ui-monospace,monospace;' +
-                    'padding:10px 12px;border-radius:10px;max-height:45vh;overflow:auto;' +
-                    'white-space:pre-wrap;word-break:break-all');
-                box.addEventListener('click', function () { box.remove(); });
-                document.body.appendChild(box);
-            }
-            var ov = rcOverlay();
-            var lines = ['RFAT-Diagnose (antippen zum Schließen)'];
-            lines.push('overlay: ' + (ov ? '.' + ov.className.trim().split(/\s+/).join('.') : 'NICHT GEFUNDEN'));
-            if (ov && ov.firstElementChild) {
-                var d = ov.firstElementChild;
-                lines.push('dialog:  <' + d.tagName.toLowerCase() + '> .' +
-                    d.className.trim().split(/\s+/).join('.'));
-                lines.push('hoehe:   ' + Math.round(d.getBoundingClientRect().height) +
-                    'px / Fenster ' + window.innerHeight + 'px');
-                var btns = d.querySelectorAll('button, a[role="button"], .close, [aria-label]');
-                lines.push('buttons: ' + (btns.length ? '' : 'keine'));
-                Array.prototype.slice.call(btns, 0, 8).forEach(function (x) {
-                    lines.push('  <' + x.tagName.toLowerCase() + '> "' +
-                        (x.textContent || '').trim().slice(0, 18) + '" .' +
-                        (x.className.trim() ? x.className.trim().split(/\s+/).join('.') : '(ohne)') +
-                        (x.id ? ' #' + x.id : ''));
-                });
-            }
-            box.textContent = lines.join('\n');
-        }
-
-        /*
-         * Fallback: Falls die Navigation kein core/navigation-Block ist und
-         * der Server-Filter deshalb nicht griff, "Termin abrufen"
-         * hier clientseitig neben "Termine & Ort" einhängen.
-         */
-        if (document.querySelector('a[href*="termin-abrufen"]')) { return; }
-
-        var ref = document.querySelector('header a[href*="termine-ort"], nav a[href*="termine-ort"]');
-        if (!ref) { return; }
-
-        var li = ref.closest('li');
-        if (li) {
-            var clone = li.cloneNode(true);
-            var a = clone.querySelector('a');
-            // Ohne diese Prüfung warf ein <li> ohne Link einen TypeError,
-            // der den Rest des Skripts mitgerissen hat.
-            if (!a) { return; }
-            a.setAttribute('href', '/termin-abrufen/');
-            a.textContent = 'Termin abrufen';
-            li.parentNode.insertBefore(clone, li.nextSibling);
-        } else {
-            var a2 = ref.cloneNode(false);
-            a2.setAttribute('href', '/termin-abrufen/');
-            a2.textContent = 'Termin abrufen';
-            ref.parentNode.insertBefore(a2, ref.nextSibling);
-        }
-    })();
-    </script>
-    <?php
-}, 999);
 
 /* =========================================================================
  * BESTÄTIGEN PER LINK AUS DER MAIL
@@ -2512,35 +2030,119 @@ add_action('wp_footer', function () {
 /* =========================================================================
  * E-MAIL DIREKT IM BESTÄTIGUNGSSCHRITT
  *
- * Das Buchungsformular gehört dem Kern-Plugin. Statt es anzufassen,
- * nimmt dieser Endpunkt die Adresse entgegen, die unser eingehängter
- * Block abfragt. Der fremde Ablauf bleibt dadurch unberührt.
+ * Früher hing dieser Block per JavaScript im Buchungs-Popup des
+ * Kern-Plugins: ein MutationObserver wartete, bis im Overlay ein
+ * Buchungscode auftauchte, und schob dann ein Eingabefeld hinein.
+ * Das war ein Behelf — wir kannten den fremden Quelltext nicht und
+ * konnten ihn nicht ändern.
+ *
+ * Seit die Buchung eine echte Seite ist, gibt es dafür einen sauberen
+ * Anknüpfpunkt: Das Kern-Plugin ruft am Ende `repairffm_after_booking`
+ * auf. Wir hängen uns dort ein und geben gewöhnliches HTML aus. Kein
+ * Beobachten fremder DOM-Zustände, kein Erraten von Klassennamen, und
+ * es funktioniert auch ohne JavaScript.
  *
  * Der Buchungscode ist der Ausweis — wie überall sonst hier auch. Wer ihn
  * hat, hat gerade gebucht.
  * ========================================================================= */
-add_action('wp_ajax_rfat_save_email', 'rfat_ajax_save_email');
-add_action('wp_ajax_nopriv_rfat_save_email', 'rfat_ajax_save_email');
+add_action('repairffm_after_booking', 'rfat_after_booking_box', 10, 2);
 
-function rfat_ajax_save_email() {
-    check_ajax_referer('rfat_save_email', 'nonce');
+function rfat_after_booking_box($code, $post_id) {
+    $code = rfat_normalize_code((string) $code);
+    if ($code === '') {
+        return;
+    }
 
-    $code  = sanitize_text_field(wp_unslash($_POST['code'] ?? ''));
-    $email = sanitize_email(wp_unslash($_POST['email'] ?? ''));
-    $keep  = !empty($_POST['keep']);
+    // Adresse schon hinterlegt (z. B. nach Neuladen der Seite)? Dann nicht
+    // noch einmal fragen, sondern bestätigen.
+    if ($post_id && get_post_meta($post_id, RFAT_EMAIL_META, true) !== '') {
+        ?>
+        <div class="rfat-after-booking">
+            <p class="rfat-ab-head">Adresse gespeichert</p>
+            <p class="rfat-ab-text">Wir melden uns, sobald der Termin bestätigt ist.</p>
+            <div class="rfat-ab-row">
+                <a class="rfat-ab-btn" href="<?php echo esc_url(home_url('/termin-abrufen/?code=' . rawurlencode($code))); ?>">Zur Terminübersicht</a>
+            </div>
+            <p class="rfat-ab-cal"><a href="<?php echo esc_url(add_query_arg('ics', $code, home_url('/termin-buchen/'))); ?>">&#128197; Zum Kalender hinzufügen</a></p>
+        </div>
+        <?php
+        return;
+    }
 
+    $fehler = isset($_GET['rfat_mail']) ? sanitize_key(wp_unslash($_GET['rfat_mail'])) : '';
+    $meldung = '';
+    if ($fehler === 'ungueltig') {
+        $meldung = 'Das sah nicht nach einer E-Mail-Adresse aus. Bitte noch einmal versuchen — oder unten ohne fortfahren.';
+    } elseif ($fehler === 'unbekannt') {
+        $meldung = 'Zu diesem Code haben wir keine Anfrage gefunden.';
+    }
+    ?>
+    <form class="rfat-after-booking" method="post" action="<?php echo esc_url(home_url('/termin-buchen/')); ?>">
+        <p class="rfat-ab-head">Möchtest du benachrichtigt werden?</p>
+        <p class="rfat-ab-text">
+            Trag hier freiwillig eine E-Mail ein, dann schreiben wir dir, sobald
+            der Termin bestätigt ist. Nötig ist sie nicht — dein Code genügt.
+        </p>
+
+        <?php wp_nonce_field('rfat_save_email', 'rfat_nonce'); ?>
+        <input type="hidden" name="rfat_code" value="<?php echo esc_attr($code); ?>">
+
+        <input type="email" name="rfat_email" class="rfat-ab-input"
+               placeholder="dein@beispiel.de (freiwillig)"
+               aria-label="E-Mail-Adresse, freiwillig">
+
+        <label class="rfat-ab-keep">
+            <input type="checkbox" name="rfat_keep" value="1">
+            <span>Adresse darf auch nach dem Termin gespeichert bleiben.
+                  Ohne Haken wird sie danach automatisch gelöscht.</span>
+        </label>
+
+        <?php if ($meldung !== ''): ?>
+            <p class="rfat-ab-hint"><?php echo esc_html($meldung); ?></p>
+        <?php endif; ?>
+
+        <div class="rfat-ab-row">
+            <button type="submit" name="rfat_save_email" value="1" class="rfat-ab-btn">E-Mail speichern und weiter</button>
+            <a class="rfat-ab-btn rfat-ab-ghost" href="<?php echo esc_url(home_url('/termin-abrufen/?code=' . rawurlencode($code))); ?>">Ohne E-Mail weiter</a>
+        </div>
+        <p class="rfat-ab-cal"><a href="<?php echo esc_url(add_query_arg('ics', $code, home_url('/termin-buchen/'))); ?>">&#128197; Zum Kalender hinzufügen</a></p>
+    </form>
+    <?php
+}
+
+/*
+ * Das Formular von oben entgegennehmen. Läuft vor jeder Ausgabe, damit
+ * anschließend weitergeleitet werden kann — sonst landet man beim
+ * Neuladen wieder auf einem abgeschickten Formular.
+ */
+add_action('template_redirect', function () {
+    if (empty($_POST['rfat_save_email'])) {
+        return;
+    }
+
+    $code = rfat_normalize_code(sanitize_text_field(wp_unslash($_POST['rfat_code'] ?? '')));
+    $back = add_query_arg('code', rawurlencode($code), home_url('/termin-buchen/'));
+
+    if (!isset($_POST['rfat_nonce']) || !wp_verify_nonce(wp_unslash($_POST['rfat_nonce']), 'rfat_save_email')) {
+        wp_safe_redirect(add_query_arg('rfat_mail', 'ungueltig', $back));
+        exit;
+    }
+
+    $email = sanitize_email(wp_unslash($_POST['rfat_email'] ?? ''));
     if ($code === '' || !is_email($email)) {
-        wp_send_json_error(['message' => 'Bitte eine gültige E-Mail-Adresse eingeben.']);
+        wp_safe_redirect(add_query_arg('rfat_mail', 'ungueltig', $back));
+        exit;
     }
 
     $match = rfat_find_booking_by_code($code);
     if (!$match) {
-        wp_send_json_error(['message' => 'Zu diesem Code wurde keine Buchung gefunden.']);
+        wp_safe_redirect(add_query_arg('rfat_mail', 'unbekannt', $back));
+        exit;
     }
 
     $post_id = $match['post']->ID;
     update_post_meta($post_id, RFAT_EMAIL_META, $email);
-    if ($keep) {
+    if (!empty($_POST['rfat_keep'])) {
         update_post_meta($post_id, RFAT_EMAIL_KEEP_META, '1');
     } else {
         delete_post_meta($post_id, RFAT_EMAIL_KEEP_META);
@@ -2548,10 +2150,9 @@ function rfat_ajax_save_email() {
 
     rfat_notify_email_added($post_id, $email);
 
-    wp_send_json_success([
-        'redirect' => home_url('/termin-abrufen/?code=' . rawurlencode(rfat_normalize_code($code))),
-    ]);
-}
+    wp_safe_redirect(home_url('/termin-abrufen/?code=' . rawurlencode($code)));
+    exit;
+}, 5);
 
 /**
  * Nachtrag an die Werkstatt, wenn kurz nach der Anfrage eine Adresse
