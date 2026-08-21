@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.13.0
+Stand: 21.08.2026 · Plugin-Version 1.13.1
 
 ---
 
@@ -313,6 +313,7 @@ Versionssprung zum ersten Mal.
 | 1.11.0 | **Buchung ist eine echte Seite** — Popup, Overlay-CSS und MutationObserver entfernt |
 | 1.12.0 | **Buchung ins Plugin geholt** — aktualisiert sich über GitHub; Schrittanzeige; Einleitung ab Schritt 2 aus |
 | 1.13.0 | Kopfleiste mit großem Hamburger, schrumpft beim Scrollen; Theme-Menü über die **Adressen** ausgeblendet statt über geratene Klassen |
+| 1.13.1 | Logo und Seitentitel beim Ausblenden verschont — 1.13.0 nahm sie mit |
 
 ---
 
@@ -588,7 +589,15 @@ stehen in unserem eigenen Menü daneben. Also sucht das Skript jetzt danach:
 2. Links darauf finden, die *oberhalb* des Inhalts stehen (`main`, `#content`)
 3. Kleinsten gemeinsamen Vorfahr bestimmen und ausblenden
 
-**Die Sicherung** ist der wichtige Teil: Enthält dieser Container merklich
+**Adresse UND Beschriftung müssen passen.** Die Adresse allein reicht
+nicht: Auf `/` zeigt in fast jedem Theme auch das **Logo** und der
+Seitentitel. Nach Adresse allein gesucht, verschwand im Test der komplette
+Seitenkopf — Logo und Titel mit. Die Beschriftung trennt beide sauber: Der
+Menüpunkt heißt „Start", das Logo trägt den Seitennamen oder gar keinen
+Text. Zusätzlich werden Links mit `img`/`svg`/`picture` übersprungen — das
+ist immer das Logo, nie ein Menüpunkt.
+
+**Die zweite Sicherung** ist ebenso wichtig: Enthält dieser Container merklich
 mehr Text als die Menüpunkte zusammen (`gesamt > summe * 2 + 40`), steckt
 vermutlich der Seitentitel mit drin. Dann werden nur die Links selbst
 ausgeblendet, nicht der Container. Lieber ein leerer Streifen als ein
@@ -596,7 +605,7 @@ verschwundener Titel.
 
 Unter zwei Treffern passiert nichts — das ist zu wenig, um sicher zu sein.
 
-**Gegengeprüft** mit Chromium gegen vier Theme-Strukturen, weil wir die
+**Gegengeprüft** mit Chromium gegen fünf Theme-Strukturen, weil wir die
 echte nicht kennen:
 
 | Struktur | Ergebnis |
@@ -605,8 +614,9 @@ echte nicht kennen:
 | Buttons-Block, gar kein `nav` | `div.wp-block-buttons` ausgeblendet |
 | Titel und Links im selben Container | Sicherung greift, Links einzeln aus, **Titel bleibt** |
 | gar kein Theme-Menü | nichts passiert, keine Fehlgriffe |
+| Logo **und** Titel verlinken auf `/` | nur die Menüliste aus, **Logo und Titel bleiben** |
 
-In allen vier Fällen blieb der Seitentitel stehen.
+In allen fünf Fällen blieben Seitentitel und Logo stehen.
 
 > **Wenn oben doch noch etwas steht:** `?rfat_diag=1` an die Adresse hängen
 > (nur als Administrator). Unten links steht dann, was gefunden und was

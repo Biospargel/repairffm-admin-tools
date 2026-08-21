@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.13.0
+ * Version: 1.13.1
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -2979,12 +2979,28 @@ add_action('wp_footer', function () {
             catch (e) { return null; }
         }
 
+        function beschriftung(el) {
+            return (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        }
+
         function themeMenuAusblenden() {
+            /*
+             * Adresse UND Beschriftung muessen passen.
+             *
+             * Die Adresse allein reicht nicht: Auf "/" zeigt in fast jedem
+             * Theme auch das Logo und der Seitentitel. Nach Adresse allein
+             * gesucht, verschwand im Test der komplette Seitenkopf - Logo
+             * und Titel mit. Die Beschriftung unterscheidet die beiden
+             * sauber: Der Menuepunkt heisst "Start", das Logo traegt den
+             * Seitennamen oder gar keinen Text.
+             */
             var gesucht = {};
             var eigene = overlay.querySelectorAll('.rfat-nav-link');
             for (var i = 0; i < eigene.length; i++) {
                 var p = pfad(eigene[i].getAttribute('href'));
-                if (p) { gesucht[p] = true; }
+                if (!p) { continue; }
+                if (!gesucht[p]) { gesucht[p] = []; }
+                gesucht[p].push(beschriftung(eigene[i]));
             }
 
             // Nur oberhalb des Inhalts suchen - Links im Text sollen bleiben.
@@ -2997,8 +3013,12 @@ add_action('wp_footer', function () {
                 if (a.closest('#wpadminbar')) { continue; }
                 if (inhalt && (inhalt.contains(a) ||
                     (inhalt.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING))) { continue; }
+                // Bildlinks sind nie Menuepunkte - das ist das Logo.
+                if (a.querySelector('img, svg, picture')) { continue; }
                 var pf = pfad(a.getAttribute('href'));
-                if (pf && gesucht[pf]) { treffer.push(a); }
+                if (pf && gesucht[pf] && gesucht[pf].indexOf(beschriftung(a)) !== -1) {
+                    treffer.push(a);
+                }
             }
 
             // Unter zwei Treffern ist die Sache nicht eindeutig genug.
