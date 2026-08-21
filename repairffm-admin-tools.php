@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ganz ohne Name/E-Mail. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.8.1
+ * Version: 1.8.2
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1090,11 +1090,21 @@ add_action('wp_head', function () {
             padding: max(16px, env(safe-area-inset-top)) 12px
                      max(16px, env(safe-area-inset-bottom));
         }
-        .rc-modal {
+        /* Nicht auf .rc-modal verlassen: Der Screenshot vom 21.08. zeigte den
+         * Dialog weiterhin unten abgeschnitten, die Klasse heißt also
+         * vermutlich anders. Über den direkten Kindselektor trifft die
+         * Begrenzung den Dialog unabhängig von seinem Namen. */
+        .rc-overlay > * {
             max-height: 85vh;
             overflow-y: auto;
             -webkit-overflow-scrolling: touch;
             box-sizing: border-box;
+        }
+
+        /* Solange der Buchungsdialog offen ist, hat unser Menüknopf dort
+         * nichts zu suchen — er lag sonst sichtbar über dem Dialog. */
+        .rfat-rc-open .rfat-nav-open {
+            display: none !important;
         }
         /* Eingeloggt verdeckt die Adminleiste sonst den oberen Rand */
         body.admin-bar .rc-overlay {
@@ -1120,8 +1130,12 @@ add_action('wp_head', function () {
  * entfernen, der Buttontext bleibt unverändert.
  */
 add_action('wp_footer', function () {
+    // Die Diagnose-Box unten ist ein Werkzeug für uns, kein Seiteninhalt —
+    // Besucher bekommen sie nie zu sehen.
+    $show_diag = current_user_can('manage_options') ? 'true' : 'false';
     ?>
     <script id="rfat-btn-cleanup">
+    window.rfatShowDiag = <?php echo $show_diag; ?>;
     (function () {
         var b = document.getElementById('rc-open');
         if (b) { b.textContent = b.textContent.replace(/[\u{1F4C5}\u{FE0F}]/gu, '').trim(); }
@@ -1138,15 +1152,99 @@ add_action('wp_footer', function () {
          * Ein Blick in den Inspektor beantwortet damit eine Frage, die dieses
          * Projekt schon mehrere wirkungslose Versionen gekostet hat.
          */
-        if (b) {
-            b.addEventListener('click', function () {
-                window.setTimeout(function () {
-                    var found = document.querySelector('.rc-modal');
-                    document.documentElement.classList.add(
-                        found ? 'rfat-rc-ok' : 'rfat-rc-missing'
-                    );
-                }, 400);
+        /*
+         * Ist der Buchungsdialog gerade offen? Wir kennen weder seinen
+         * Schließen-Button noch seine genauen Klassen, deshalb wird der
+         * Zustand beobachtet statt an Klicks gekoppelt: Ein MutationObserver
+         * meldet jede Änderung, und geprüft wird, ob das Overlay tatsächlich
+         * sichtbar ist. Das funktioniert auch, wenn der Dialog über einen
+         * Weg geschlossen wird, den wir nicht kennen.
+         */
+        function rcOverlay() {
+            var el = document.querySelector('.rc-overlay');
+            if (!el) { return null; }
+            var cs = window.getComputedStyle(el);
+            if (cs.display === 'none' || cs.visibility === 'hidden' || el.offsetParent === null) {
+                return null;
+            }
+            return el;
+        }
+
+        var rcWasOpen = false;
+        function rcSync() {
+            var open = !!rcOverlay();
+            if (open === rcWasOpen) { return; }
+            rcWasOpen = open;
+            document.documentElement.classList.toggle('rfat-rc-open', open);
+            if (open) { rcReport(); }
+        }
+
+        /* Der Observer hängt am ganzen body und feuert entsprechend oft.
+         * Ohne Bremse liefe bei jeder Mutation ein getComputedStyle — deshalb
+         * wird die Prüfung auf höchstens einmal pro Frame gebündelt. */
+        var rcPending = false;
+        function rcQueue() {
+            if (rcPending) { return; }
+            rcPending = true;
+            window.requestAnimationFrame(function () {
+                rcPending = false;
+                rcSync();
             });
+        }
+
+        if (window.MutationObserver) {
+            new MutationObserver(rcQueue).observe(document.body, {
+                childList: true, subtree: true, attributes: true,
+                attributeFilter: ['class', 'style', 'hidden']
+            });
+        }
+        rcSync();
+
+        /*
+         * Sichtbare Diagnose – nur für angemeldete Redakteure.
+         *
+         * Die Klassennamen des Buchungsdialogs stammen aus dem gerenderten
+         * HTML und sind nicht durch Quellcode bestätigt; zweimal wurde
+         * deshalb CSS geschrieben, das ins Leere lief. Der Entwickler-
+         * Inspektor ist auf dem Handy praktisch nicht bedienbar, also zeigt
+         * diese Box die echte Struktur direkt auf dem Bildschirm an — ein
+         * Screenshot genügt, um die richtigen Selektoren zu erfahren.
+         *
+         * Für Besucher ist sie unsichtbar (siehe rfatShowDiag unten).
+         */
+        function rcReport() {
+            if (!window.rfatShowDiag) { return; }
+            var box = document.getElementById('rfat-diag');
+            if (!box) {
+                box = document.createElement('div');
+                box.id = 'rfat-diag';
+                box.setAttribute('style',
+                    'position:fixed;left:8px;right:8px;bottom:8px;z-index:100001;' +
+                    'background:#1c2a22;color:#fff;font:12px/1.45 ui-monospace,monospace;' +
+                    'padding:10px 12px;border-radius:10px;max-height:45vh;overflow:auto;' +
+                    'white-space:pre-wrap;word-break:break-all');
+                box.addEventListener('click', function () { box.remove(); });
+                document.body.appendChild(box);
+            }
+            var ov = rcOverlay();
+            var lines = ['RFAT-Diagnose (antippen zum Schließen)'];
+            lines.push('overlay: ' + (ov ? '.' + ov.className.trim().split(/\s+/).join('.') : 'NICHT GEFUNDEN'));
+            if (ov && ov.firstElementChild) {
+                var d = ov.firstElementChild;
+                lines.push('dialog:  <' + d.tagName.toLowerCase() + '> .' +
+                    d.className.trim().split(/\s+/).join('.'));
+                lines.push('hoehe:   ' + Math.round(d.getBoundingClientRect().height) +
+                    'px / Fenster ' + window.innerHeight + 'px');
+                var btns = d.querySelectorAll('button, a[role="button"], .close, [aria-label]');
+                lines.push('buttons: ' + (btns.length ? '' : 'keine'));
+                Array.prototype.slice.call(btns, 0, 8).forEach(function (x) {
+                    lines.push('  <' + x.tagName.toLowerCase() + '> "' +
+                        (x.textContent || '').trim().slice(0, 18) + '" .' +
+                        (x.className.trim() ? x.className.trim().split(/\s+/).join('.') : '(ohne)') +
+                        (x.id ? ' #' + x.id : ''));
+                });
+            }
+            box.textContent = lines.join('\n');
         }
 
         /*
