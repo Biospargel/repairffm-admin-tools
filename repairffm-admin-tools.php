@@ -1439,38 +1439,81 @@ add_action('wp_head', function () {
             backdrop-filter: saturate(1.4) blur(8px);
             -webkit-backdrop-filter: saturate(1.4) blur(8px);
         }
+        /*
+         * Der Knopf war weiss mit dünnem Rand — auf dem ohnehin weissen
+         * Seitenkopf ging er darin unter. Jetzt im Grün der Seite, damit
+         * er als das erkennbar ist, was er ist: die einzige Navigation.
+         */
         .rfat-nav-open {
             display: flex;
             pointer-events: auto;
             align-items: center;
             justify-content: center;
-            width: 62px;
-            height: 62px;
+            width: 60px;
+            height: 60px;
             padding: 0;
-            border: 1px solid #cfd8d2;
-            border-radius: 16px;
-            background: #fff;
-            color: #1c2a22;
+            border: 0;
+            border-radius: 19px;
+            background: #2f7d4f;
             cursor: pointer;
-            box-shadow: 0 2px 14px rgba(28, 42, 34, .14);
-            transition: width .18s ease, height .18s ease,
-                        border-radius .18s ease, box-shadow .18s ease;
+            box-shadow: 0 4px 16px rgba(31, 90, 56, .30);
+            transition: width .2s ease, height .2s ease, border-radius .2s ease,
+                        box-shadow .2s ease, transform .12s ease, background-color .2s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .rfat-nav-open:active { transform: scale(.93); }
+        .rfat-nav-open:focus-visible {
+            outline: 3px solid #1f5a38;
+            outline-offset: 3px;
         }
         .rfat-topbar.is-small .rfat-nav-open {
             width: 44px;
             height: 44px;
-            border-radius: 12px;
-            box-shadow: 0 1px 6px rgba(28, 42, 34, .12);
+            border-radius: 14px;
+            box-shadow: 0 2px 8px rgba(31, 90, 56, .26);
         }
-        /* Die Striche wachsen und schrumpfen mit. */
-        .rfat-nav-open svg {
-            width: 30px;
-            height: 30px;
-            transition: width .18s ease, height .18s ease;
+
+        /*
+         * Drei einzelne Striche statt eines SVG-Pfades: nur so lassen sie
+         * sich beim Öffnen zum Kreuz zusammenlegen. Der mittlere ist etwas
+         * kürzer — das nimmt dem Symbol die Strenge.
+         */
+        .rfat-burger {
+            position: relative;
+            display: block;
+            width: 26px;
+            height: 18px;
+            transition: width .2s ease, height .2s ease;
         }
-        .rfat-topbar.is-small .rfat-nav-open svg {
-            width: 22px;
-            height: 22px;
+        .rfat-topbar.is-small .rfat-burger { width: 19px; height: 13px; }
+        .rfat-burger span {
+            position: absolute;
+            left: 0;
+            height: 2.5px;
+            width: 100%;
+            border-radius: 2px;
+            background: #fff;
+            transition: transform .26s cubic-bezier(.2, .7, .3, 1),
+                        opacity .16s ease, width .2s ease;
+        }
+        .rfat-burger span:nth-child(1) { top: 0; }
+        .rfat-burger span:nth-child(2) { top: 50%; margin-top: -1.25px; width: 68%; }
+        .rfat-burger span:nth-child(3) { bottom: 0; }
+        /* Beim Öffnen zum Kreuz — sichtbar, solange das Menü einblendet. */
+        .rfat-nav-open[aria-expanded="true"] .rfat-burger span:nth-child(1) {
+            transform: translateY(7.75px) rotate(45deg);
+        }
+        .rfat-nav-open[aria-expanded="true"] .rfat-burger span:nth-child(2) {
+            opacity: 0;
+            width: 100%;
+        }
+        .rfat-nav-open[aria-expanded="true"] .rfat-burger span:nth-child(3) {
+            transform: translateY(-7.75px) rotate(-45deg);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .rfat-nav-open, .rfat-burger, .rfat-burger span, .rfat-topbar {
+                transition: none;
+            }
         }
         /* Eingeloggt schiebt die Adminleiste alles nach unten (mobil 46px hoch) */
         body.admin-bar .rfat-topbar {
@@ -2864,9 +2907,7 @@ add_action('wp_footer', function () {
     <div class="rfat-topbar" id="rfat-topbar" hidden>
         <button type="button" class="rfat-nav-open" id="rfat-nav-open"
                 aria-label="Menü öffnen" aria-expanded="false" aria-controls="rfat-nav-overlay">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path fill="currentColor" d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
-            </svg>
+            <span class="rfat-burger" aria-hidden="true"><span></span><span></span><span></span></span>
         </button>
     </div>
 

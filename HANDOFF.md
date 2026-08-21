@@ -613,7 +613,16 @@ In allen vier Fällen blieb der Seitentitel stehen.
 > ausgeblendet wurde. Ein Screenshot davon genügt, um es zu beheben — genau
 > das hatte beim Schließen-Knopf des alten Popups die Raterei beendet.
 
-### Kopfleiste (1.13.0)
+### Kopfleiste und Hamburger (1.13.0)
+
+Der Knopf war weiß mit dünnem Rand — auf dem ohnehin weißen Seitenkopf ging
+er darin unter. Jetzt im Grün der Seite (`#2f7d4f`), damit er als das
+erkennbar ist, was er ist: die einzige Navigation.
+
+Drei einzelne `<span>` statt eines SVG-Pfades, weil sich nur so beim Öffnen
+ein Kreuz daraus legen lässt. Der mittlere Strich ist auf 68 % gekürzt, das
+nimmt dem Symbol die Strenge. `prefers-reduced-motion` schaltet alle
+Übergänge ab.
 
 Der Hamburger schwebte bisher frei in der Ecke. Jetzt sitzt er in einer
 Leiste am oberen Rand, die beim Herunterscrollen schrumpft: oben 62 px für
