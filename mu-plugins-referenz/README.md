@@ -1,5 +1,21 @@
 # Referenz: Buchungs-Plugin des Kern-Systems
 
+> **Ueberholt seit Plugin 1.12.0.** Die Buchung steckt jetzt in
+> `repairffm-admin-tools.php` und aktualisiert sich ueber GitHub mit.
+> Die Datei `/wp-content/mu-plugins/repairffm-core.php` gehoert
+> **geloescht** - solange sie liegen bleibt, hat sie Vorrang und
+> Aenderungen am Buchungsablauf kommen nicht an.
+>
+> Warum der Umzug: mu-Plugins kennt der WordPress-Updater nicht. Sie
+> haben keine Version, tauchen unter "Plugins" nicht auf und lassen sich
+> nicht aktualisieren - jede Aenderung musste von Hand auf den Server.
+> Genau daran liefen die beiden Haelften am 21.08.2026 auseinander:
+> Das Begleit-Plugin war aktuell, das mu-Plugin nicht, und dazwischen
+> verschwand das E-Mail-Feld.
+>
+> Die Dateien hier bleiben als Nachschlagewerk und als Beleg, wie der
+> Ablauf vor dem Umzug aussah.
+
 Kopie von `/wp-content/mu-plugins/repairffm-core.php`, Stand 21.08.2026.
 **Nur zum Nachschlagen.** Aenderungen hier wirken auf der Website nicht -
 die Live-Datei liegt auf dem Umbrel-Server unter
