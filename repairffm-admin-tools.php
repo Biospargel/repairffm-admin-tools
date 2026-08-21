@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ganz ohne Name/E-Mail. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.8.2
+ * Version: 1.8.3
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -635,9 +635,25 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         }
     }
 
-    // Lookup.
+    // Lookup per Formular.
     if (!empty($_POST['rfat_pub_action']) && $_POST['rfat_pub_action'] === 'lookup' && !empty($_POST['rfat_pub_code'])) {
         $code_value = sanitize_text_field(wp_unslash($_POST['rfat_pub_code']));
+    }
+
+    /*
+     * Lookup per Link: /termin-abrufen/?code=RC-AB12C
+     *
+     * Bisher ging der Abruf nur über das Formular — ein Termin ließ sich
+     * also nicht verlinken, nur abtippen. Mit dem GET-Weg entsteht eine
+     * Adresse, die sich speichern und teilen lässt.
+     *
+     * Sicherheitslage unverändert: Der Code war schon immer das einzige
+     * Credential, wer ihn kennt, sieht den Termin. Neu ist nur, dass er
+     * jetzt auch in der Adresszeile stehen darf — und damit in Verlauf
+     * und Lesezeichen landen kann. Genau das ist hier der Zweck.
+     */
+    if ($code_value === '' && !empty($_GET['code'])) {
+        $code_value = sanitize_text_field(wp_unslash($_GET['code']));
     }
 
     if ($code_value !== '') {
@@ -680,6 +696,30 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             .rfat-pub-reschedule ol { margin: 6px 0 0; padding-left: 20px; }
             .rfat-pub-reschedule li { margin-bottom: 4px; }
 
+            .rfat-pub-share {
+                margin: 18px 0;
+                padding: 16px 18px;
+                background: #f4f8f5;
+                border: 1px solid #dbe6df;
+                border-radius: 16px;
+            }
+            .rfat-pub-share-label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 8px; color: #1c2a22; }
+            .rfat-pub-share-row { display: flex; gap: 8px; flex-wrap: wrap; }
+            .rfat-pub-share-url {
+                flex: 1 1 220px;
+                min-width: 0;
+                font-size: 15px;
+                padding: 11px 14px;
+                border: 1.5px solid #d7e0da;
+                border-radius: 12px;
+                background: #fff;
+                color: #1c2a22;
+                box-sizing: border-box;
+            }
+            .rfat-pub-copy { flex: 0 0 auto; }
+            .rfat-pub-copy.is-done { background: #1f5a38; }
+            .rfat-pub-share-hint { margin: 10px 0 0; font-size: 13px; color: #5b6b62; }
+
             .rfat-pub-code-input {
                 font-size: 16px;
                 padding: 12px 16px;
@@ -715,6 +755,29 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             ?>
             <?php echo rfat_public_booking_details_html($post, $analysis); ?>
 
+            <?php
+            // Direktlink auf genau diesen Termin — zum Speichern statt Abtippen.
+            $share_url = add_query_arg('code', $norm_code, get_permalink());
+            ?>
+            <div class="rfat-pub-share">
+                <label class="rfat-pub-share-label" for="rfat-share-<?php echo esc_attr($post->ID); ?>">
+                    Dein persönlicher Link — damit kommst du jederzeit wieder hierher:
+                </label>
+                <div class="rfat-pub-share-row">
+                    <input class="rfat-pub-share-url" type="text" readonly
+                           id="rfat-share-<?php echo esc_attr($post->ID); ?>"
+                           value="<?php echo esc_url($share_url); ?>"
+                           onfocus="this.select();" />
+                    <button type="button" class="btn rfat-pub-copy"
+                            data-target="rfat-share-<?php echo esc_attr($post->ID); ?>">Kopieren</button>
+                </div>
+                <p class="rfat-pub-share-hint">
+                    Bewahre ihn gut auf: Weil wir weder Namen noch E-Mail speichern,
+                    ist er zusammen mit deinem Code <?php echo esc_html($norm_code); ?>
+                    der einzige Weg zurück zu deinem Termin.
+                </p>
+            </div>
+
             <div class="rfat-pub-actions">
                 <form method="post" onsubmit="return confirm('Diesen Termin wirklich stornieren?');">
                     <?php wp_nonce_field('rfat_pub_cancel_' . $norm_code); ?>
@@ -748,6 +811,46 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 </form>
             </div>
         <?php endif; ?>
+
+        <script>
+        (function () {
+            var btns = document.querySelectorAll('.rfat-pub-copy');
+            if (!btns.length) { return; }
+
+            Array.prototype.forEach.call(btns, function (btn) {
+                btn.addEventListener('click', function () {
+                    var field = document.getElementById(btn.getAttribute('data-target'));
+                    if (!field) { return; }
+
+                    function done() {
+                        var before = btn.textContent;
+                        btn.textContent = 'Kopiert ✓';
+                        btn.classList.add('is-done');
+                        window.setTimeout(function () {
+                            btn.textContent = before;
+                            btn.classList.remove('is-done');
+                        }, 2000);
+                    }
+
+                    /* Die Zwischenablage-API gibt es nur im sicheren Kontext
+                     * und nicht in älteren Browsern — deshalb der alte Weg
+                     * als Rückfall. Klappt beides nicht, bleibt der Text
+                     * markiert und lässt sich von Hand kopieren. */
+                    if (navigator.clipboard && window.isSecureContext) {
+                        navigator.clipboard.writeText(field.value).then(done, function () {
+                            field.select();
+                        });
+                        return;
+                    }
+                    field.select();
+                    field.setSelectionRange(0, 99999);
+                    try {
+                        if (document.execCommand('copy')) { done(); }
+                    } catch (e) { /* Auswahl bleibt bestehen */ }
+                });
+            });
+        })();
+        </script>
     </div>
     <?php
     return ob_get_clean();
