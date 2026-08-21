@@ -165,6 +165,17 @@ function rfat_humanize_key($key) {
     return $label !== '' ? ucfirst($label) : $key;
 }
 
+/*
+ * Termine gelten seit 1.9.0 nicht mehr automatisch als angenommen.
+ *
+ * Eine neue Buchung ist eine ANFRAGE; erst die Werkstatt bestätigt sie.
+ * Der alte Wert 'offen' bleibt gültig, damit Buchungen aus der Zeit davor
+ * nicht plötzlich als unbestätigt dastehen — sie waren es ja nie.
+ */
+function rfat_status_values() {
+    return ['angefragt', 'bestaetigt', 'offen', 'erledigt', 'storniert'];
+}
+
 function rfat_get_status($post_id) {
     $status = get_post_meta($post_id, RFAT_STATUS_META, true);
     return $status ? $status : 'offen';
@@ -172,18 +183,22 @@ function rfat_get_status($post_id) {
 
 function rfat_status_label($status) {
     $labels = [
-        'offen'     => 'Offen',
-        'erledigt'  => 'Erledigt',
-        'storniert' => 'Storniert',
+        'angefragt'  => 'Angefragt',
+        'bestaetigt' => 'Bestätigt',
+        'offen'      => 'Offen',
+        'erledigt'   => 'Erledigt',
+        'storniert'  => 'Storniert',
     ];
     return isset($labels[$status]) ? $labels[$status] : ucfirst($status);
 }
 
 function rfat_status_color($status) {
     $colors = [
-        'offen'     => '#2f7d4f',
-        'erledigt'  => '#5b6b62',
-        'storniert' => '#b3402f',
+        'angefragt'  => '#c08a1e',
+        'bestaetigt' => '#2f7d4f',
+        'offen'      => '#2f7d4f',
+        'erledigt'   => '#5b6b62',
+        'storniert'  => '#b3402f',
     ];
     return isset($colors[$status]) ? $colors[$status] : '#5b6b62';
 }
@@ -493,6 +508,10 @@ function rfat_render_overview_page() {
                             </span>
                         </td>
                         <td>
+                            <?php if (in_array($status, ['angefragt', 'offen'], true)): ?>
+                                <a class="button button-primary" style="margin-bottom:4px;"
+                                   href="<?php echo esc_url(rfat_action_url($p->ID, 'bestaetigen')); ?>">Zusagen</a>
+                            <?php endif; ?>
                             <button type="button" class="button rfat-toggle" data-target="<?php echo esc_attr($edit_id); ?>">Bearbeiten</button>
                             <form method="post" style="display:inline;" onsubmit="return confirm('Diese Buchung in den Papierkorb verschieben?');">
                                 <?php wp_nonce_field('rfat_trash_' . $p->ID); ?>
@@ -533,7 +552,7 @@ function rfat_render_overview_page() {
                                 <p>
                                     <label style="display:block;font-weight:600;margin-bottom:2px;">Status</label>
                                     <select name="rfat_status">
-                                        <?php foreach (['offen', 'erledigt', 'storniert'] as $s): ?>
+                                        <?php foreach (rfat_status_values() as $s): ?>
                                             <option value="<?php echo esc_attr($s); ?>" <?php selected($status, $s); ?>><?php echo esc_html(rfat_status_label($s)); ?></option>
                                         <?php endforeach; ?>
                                     </select>
@@ -1007,6 +1026,14 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                     <?php echo esc_html($norm_code); ?> dein Weg zurück.
                 </p>
             </div>
+
+            <?php if (rfat_get_status($post->ID) === 'angefragt'): ?>
+                <div class="rfat-pub-notice" style="background:#fbf2e2;color:#7a5510;">
+                    <strong>Noch nicht bestätigt.</strong> Deine Anfrage ist bei uns eingegangen —
+                    wir melden uns, sobald wir sie angesehen haben. Komm bitte erst vorbei,
+                    wenn hier <em>Bestätigt</em> steht.
+                </div>
+            <?php endif; ?>
 
             <?php
             $cur_email = (string) get_post_meta($post->ID, RFAT_EMAIL_META, true);
@@ -1742,14 +1769,18 @@ add_action('wp_footer', function () {
 
             var head = document.createElement('p');
             head.className = 'rfat-ab-head';
-            head.textContent = 'Termin verwalten';
+            head.textContent = 'Anfrage eingegangen';
             box.appendChild(head);
 
             var intro = document.createElement('p');
             intro.className = 'rfat-ab-text';
-            intro.textContent = 'Über diesen Link kommst du jederzeit zu deinem Termin '
-                + 'zurück — verschieben, absagen, oder freiwillig eine E-Mail '
-                + 'hinterlegen, wenn du benachrichtigt werden möchtest.';
+            /* Der Dialog des Kern-Plugins meldet "Termin gebucht!". Seit 1.9.0
+             * ist das eine Anfrage, die noch bestätigt werden muss - hier wird
+             * das richtiggestellt, solange wir an jenen Text nicht herankommen. */
+            intro.textContent = 'Wir sehen uns deine Anfrage an und bestätigen sie. '
+                + 'Über diesen Link kommst du jederzeit zurück — Stand ansehen, '
+                + 'verschieben, absagen, oder eine E-Mail hinterlegen, wenn du '
+                + 'über die Bestätigung benachrichtigt werden möchtest.';
             box.appendChild(intro);
 
             var row = document.createElement('div');
@@ -1854,6 +1885,128 @@ add_action('wp_footer', function () {
     </script>
     <?php
 }, 999);
+
+/* =========================================================================
+ * BESTÄTIGEN PER LINK AUS DER MAIL
+ *
+ * Der Link muss ohne Anmeldung funktionieren — sonst wäre er auf dem Handy
+ * nutzlos. Statt einer Anmeldung trägt er eine Signatur aus Post-ID,
+ * Aktion und den WordPress-Salts. Ohne Kenntnis der Salts lässt sie sich
+ * nicht erzeugen, und sie gilt nur für genau diese eine Buchung.
+ *
+ * Geklickt wird nicht sofort ausgeführt: Mailprogramme und Virenscanner
+ * rufen Links in Nachrichten ungefragt auf. Der Link zeigt die Buchung und
+ * fragt nach; bestätigt wird per Knopfdruck.
+ * ========================================================================= */
+
+/**
+ * Signatur für einen Bestätigungslink.
+ */
+function rfat_action_token($post_id, $action) {
+    return substr(wp_hash($action . '|' . $post_id . '|' . get_post_time('U', true, $post_id), 'nonce'), 0, 20);
+}
+
+function rfat_action_url($post_id, $action) {
+    return add_query_arg([
+        'rfat_do'    => $action,
+        'rfat_id'    => $post_id,
+        'rfat_token' => rfat_action_token($post_id, $action),
+    ], home_url('/'));
+}
+
+add_action('template_redirect', function () {
+    if (empty($_GET['rfat_do']) || empty($_GET['rfat_id']) || empty($_GET['rfat_token'])) {
+        return;
+    }
+    $action  = sanitize_key(wp_unslash($_GET['rfat_do']));
+    $post_id = (int) $_GET['rfat_id'];
+    $token   = sanitize_text_field(wp_unslash($_GET['rfat_token']));
+
+    if (!in_array($action, ['bestaetigen', 'absagen'], true)) {
+        return;
+    }
+    $post = get_post($post_id);
+    if (!$post || $post->post_type !== 'rc_booking') {
+        wp_die('Diese Buchung gibt es nicht mehr.', 'Nicht gefunden', ['response' => 404]);
+    }
+    if (!hash_equals(rfat_action_token($post_id, $action), $token)) {
+        wp_die('Dieser Link ist nicht gültig.', 'Ungültiger Link', ['response' => 403]);
+    }
+
+    $analysis = rfat_analyse_booking($post_id);
+    $ts       = $analysis['datetime'] ? $analysis['datetime']->getTimestamp() : null;
+    $code     = $analysis['code']['value'] ?? '';
+    $done     = false;
+
+    if (!empty($_POST['rfat_confirm_go'])
+        && wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_do_' . $action . '_' . $post_id)) {
+        if ($action === 'bestaetigen') {
+            update_post_meta($post_id, RFAT_STATUS_META, 'bestaetigt');
+            rfat_notify_customer($post_id, 'bestaetigt');
+        } else {
+            update_post_meta($post_id, RFAT_STATUS_META, 'storniert');
+            rfat_notify_customer($post_id, 'abgesagt');
+            wp_trash_post($post_id);
+        }
+        $done = true;
+    }
+
+    $titel  = $action === 'bestaetigen' ? 'Termin bestätigen' : 'Termin absagen';
+    $status = rfat_get_status($post_id);
+
+    $html  = '<p><strong>' . esc_html($ts ? wp_date('l, d.m.Y', $ts) . ' um ' . wp_date('H:i', $ts) . ' Uhr' : 'Termin unbekannt') . '</strong><br />';
+    $html .= 'Code: ' . esc_html($code) . '</p>';
+
+    if ($done) {
+        $html .= '<p>Erledigt. Der Termin steht jetzt auf <strong>'
+            . esc_html(rfat_status_label($action === 'bestaetigen' ? 'bestaetigt' : 'storniert'))
+            . '</strong>.</p>';
+        $html .= '<p><a href="' . esc_url(admin_url('edit.php?post_type=rc_booking&page=rfat-overview')) . '">Zur Übersicht</a></p>';
+    } elseif (in_array($status, ['bestaetigt', 'storniert'], true)) {
+        $html .= '<p>Dieser Termin steht bereits auf <strong>' . esc_html(rfat_status_label($status)) . '</strong>. Es ist nichts zu tun.</p>';
+    } else {
+        $html .= '<form method="post">' . wp_nonce_field('rfat_do_' . $action . '_' . $post_id, '_wpnonce', true, false)
+            . '<input type="hidden" name="rfat_confirm_go" value="1" />'
+            . '<p><button type="submit" style="font-size:16px;padding:12px 22px;border:0;border-radius:10px;background:'
+            . ($action === 'bestaetigen' ? '#2f7d4f' : '#b3402f')
+            . ';color:#fff;font-weight:700;cursor:pointer;">'
+            . esc_html($titel) . '</button></p></form>';
+    }
+
+    wp_die($html, $titel, ['response' => 200, 'back_link' => false]);
+});
+
+/**
+ * Den Gast informieren — nur wenn er freiwillig eine Adresse hinterlegt hat.
+ */
+function rfat_notify_customer($post_id, $was) {
+    $to = (string) get_post_meta($post_id, RFAT_EMAIL_META, true);
+    if ($to === '' || !is_email($to)) {
+        return;
+    }
+    $analysis = rfat_analyse_booking($post_id);
+    $ts       = $analysis['datetime'] ? $analysis['datetime']->getTimestamp() : null;
+    $code     = rfat_normalize_code($analysis['code']['value'] ?? '');
+    $when     = $ts ? wp_date('l, d.m.Y', $ts) . ' um ' . wp_date('H:i', $ts) . ' Uhr' : 'Termin unbekannt';
+    $manage   = home_url('/termin-abrufen/?code=' . rawurlencode($code));
+
+    if ($was === 'bestaetigt') {
+        $subject = 'Dein Reparaturtermin ist bestätigt';
+        $body    = "Guten Tag,\n\ndein Termin steht:\n\n" . $when . "\nCode: " . $code
+            . "\n\nTermin ansehen, verschieben oder absagen:\n" . $manage;
+    } else {
+        $subject = 'Dein Reparaturtermin konnte nicht stattfinden';
+        $body    = "Guten Tag,\n\nleider können wir deinen Termin nicht wahrnehmen:\n\n"
+            . $when . "\nCode: " . $code
+            . "\n\nDu kannst jederzeit einen neuen Termin buchen:\n" . home_url('/termin-buchen/');
+    }
+
+    $body .= "\n\nKeine Nachrichten mehr? Hier abmelden:\n"
+        . home_url('/termin-abrufen/?abmelden=' . rawurlencode($code))
+        . "\n\n-- \n" . get_bloginfo('name');
+
+    wp_mail($to, $subject, $body);
+}
 
 /* =========================================================================
  * STATUSVERMERK IM SEITENFUSS
@@ -2122,18 +2275,25 @@ add_action('wp_after_insert_post', function ($post_id, $post, $update) {
     }
     update_post_meta($post_id, RFAT_NOTIFIED_META, '1');
 
+    // Eine neue Buchung ist eine Anfrage, keine Zusage.
+    if (!get_post_meta($post_id, RFAT_STATUS_META, true)) {
+        update_post_meta($post_id, RFAT_STATUS_META, 'angefragt');
+    }
+
     $to = rfat_notify_recipients();
     if (!$to) {
         return;
     }
 
     $overview = admin_url('edit.php?post_type=rc_booking&page=rfat-overview');
-    $body = "Es wurde ein neuer Termin gebucht.\n\n"
+    $body = "Es wurde ein Termin ANGEFRAGT und wartet auf deine Zusage.\n\n"
           . rfat_booking_summary($post_id) . "\n\n"
+          . "Zusagen:\n" . rfat_action_url($post_id, 'bestaetigen') . "\n\n"
+          . "Absagen:\n" . rfat_action_url($post_id, 'absagen') . "\n\n"
           . "Übersicht öffnen:\n" . $overview . "\n\n"
           . "-- \nAutomatische Nachricht von " . get_bloginfo('name');
 
-    wp_mail($to, sprintf('[%s] Neue Terminbuchung', get_bloginfo('name')), $body);
+    wp_mail($to, sprintf('[%s] Neue Terminanfrage', get_bloginfo('name')), $body);
 }, 20, 3);
 
 /* =========================================================================
