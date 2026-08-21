@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 20.08.2026 · Plugin-Version 1.8.0
+Stand: 21.08.2026 · Plugin-Version 1.8.0
 
 ---
 
@@ -169,18 +169,49 @@ Customizer-CSS gewinnt.
 - **Randabstand mobil:** über die CSS-Variablen
   `--wp--style--root--padding-left/right` (offizieller Block-Theme-Mechanismus)
   plus Fallback für Layout-Container.
-- **Handy-Menü:** `render_block_data` erzwingt `overlayMenu = 'mobile'` →
-  WordPress' eingebautes Hamburger-Overlay (barrierefrei, Fokus-Handling
-  inklusive), von uns gestylt: helle Fläche, Menüpunkte als weiße Karten.
+- **Handy-Menü:** siehe 3.5 — seit 1.8.0 ein eigenständiges Menü statt des
+  Theme-Overlays.
+- **Breakpoints:** Layout-Anpassungen bis 782px, das **Menü bis 600px**. 600px
+  ist die Grenze, ab der WordPress' Navigationsblock auf Overlay umschaltet;
+  782px ist der wp-admin-Wert und war hier bis 1.8.0 falsch gesetzt.
+- **`overflow-x: hidden` liegt auf `body`, nicht auf `html`.** Auf dem
+  html-Element schaltet es `position: sticky` für alle Kindelemente ab — ein
+  klebriger Theme-Header funktioniert dann nicht mehr.
 
-### 3.5 Navigation
+### 3.5 Eigenständiges Handy-Menü (seit 1.8.0)
+
+Button und Overlay werden **serverseitig** ausgegeben, unabhängig davon,
+welchen Navigationsblock das Theme benutzt. Grund siehe Abschnitt 7.
+
+Die Menüpunkte kommen aus echten WordPress-Daten statt aus DOM-Scraping —
+`rfat_get_menu_items()` versucht der Reihe nach:
+
+1. klassisches Menü (`wp_get_nav_menu_items`)
+2. `wp_navigation`-Post (so speichern Block-Themes ihre Menüs), rekursiv nach
+   `core/navigation-link` und `core/page-list` durchsucht
+3. veröffentlichte Top-Level-Seiten
+
+Ergebnis 12 h im Transient `rfat_menu_items`, verworfen bei
+`wp_update_nav_menu` und beim Speichern von Seiten/Navigation.
+
+Barrierefrei: `aria-expanded`, Escape schließt, Fokusfalle im offenen Menü,
+Fokus-Rückgabe beim Schließen, Scroll-Sperre der Seite dahinter.
+
+**Kein doppelter Hamburger:** Findet das Skript ein
+`.wp-block-navigation__responsive-container-open` des Themes, entfernt es
+unser Menü restlos und überlässt dem Theme den Vortritt.
+
+**Selbstdiagnose:** `<html>` bekommt `rfat-nav-core` oder
+`rfat-nav-fallback` — im Inspektor sofort sichtbar, welcher Weg läuft.
+
+### 3.6 Navigation
 
 `render_block_core/navigation` hängt **„Termin abrufen"** serverseitig an die
 Menüliste. Zusätzlich ein Client-Fallback im Footer, falls die Navigation kein
 `core/navigation`-Block ist. Doppelte Einträge sind ausgeschlossen (Prüfung auf
 `termin-abrufen` im Markup).
 
-### 3.6 GitHub-Auto-Update
+### 3.7 GitHub-Auto-Update
 
 Nutzt den **offiziellen WordPress-Mechanismus** (seit 5.8):
 `Update URI`-Header im Plugin-Kopf → WordPress fragt den Filter
@@ -194,8 +225,29 @@ Nutzt den **offiziellen WordPress-Mechanismus** (seit 5.8):
   „Source code (zip)" (falscher Ordnername → würde das Plugin beim Update
   umbenennen)
 
-**Release-Prozess:** Tag `vX.Y.Z` (muss zur `Version:` im Plugin-Kopf passen)
-+ die gebaute Zip als Asset anhängen.
+**Härtung in 1.8.0:**
+
+- `slug` fällt nicht mehr auf `.` zurück, wenn das Plugin als Einzeldatei
+  direkt in `/wp-content/plugins/` liegt
+- vollständige Update-Felder (`id`, `plugin`, `new_version`, `tested`,
+  `requires_php`) — ohne sie blieb die Zeile auf der Plugin-Seite leer
+- `upgrader_source_selection` biegt abweichende Zip-Ordnernamen zurecht
+- Asset-Auswahl bevorzugt die Zip, deren Name zum Slug passt, nimmt sonst
+  die erste `.zip`
+
+**Release-Prozess: automatisch (seit PR #2).** Der Workflow
+`.github/workflows/release.yml` läuft, sobald sich `repairffm-admin-tools.php`
+auf `main` ändert, liest die Version aus dem Plugin-Kopf und legt Tag, Zip und
+Release an. Existiert das Release schon, passiert nichts — gefahrlos
+wiederholbar. Vorgeschaltet `php -l`; bei Syntaxfehler entsteht kein Release.
+
+> **Der einzige Auslöser ist die Versionsnummer im Plugin-Kopf.** Wer Code
+> ändert, ohne sie hochzuzählen, bekommt kein Release — und keine Fehlermeldung.
+
+Handarbeit ist damit nur noch der Merge. Getestet am 21.08.2026 per
+`workflow_dispatch`: Version korrekt gelesen, bestehendes `v1.8.0` erkannt,
+Bau und Release übersprungen. Der scharfe Pfad läuft beim nächsten
+Versionssprung zum ersten Mal.
 
 ---
 
@@ -225,6 +277,8 @@ Nutzt den **offiziellen WordPress-Mechanismus** (seit 5.8):
 - ✅ Selbstverwaltung per Code
 - ✅ Menüeintrag + mobiles Hamburger-Menü
 - ✅ GitHub-Updater
+- ✅ Erstes Release (`v1.8.0`) angelegt und verifiziert
+- ✅ Releases entstehen automatisch per GitHub Actions
 
 ---
 
@@ -249,6 +303,27 @@ PHP-Standardzeitzone.
   sonst wirkt eine Änderung fälschlich als „hat nicht funktioniert".
 - **Immer die Plugin-Version prüfen**, bevor man einem Screenshot glaubt —
   einmal wurde eine Version getestet, die gar nicht aktiv war.
+
+### Release-Fallstricke (erlebt am 20.08.2026)
+
+Das erste, von Hand angelegte Release hatte gleich drei Fehler: Tag
+`Biospargel.org` statt `v1.8.0`, **kein Asset**, und als Ziel den
+Feature-Branch statt `main`.
+
+Tückisch daran: **Der Updater gibt bei einem unbrauchbaren Release
+schweigend auf** und merkt sich das Ergebnis eine Stunde lang. Von außen
+sieht das genauso aus wie „kein Update vorhanden".
+
+- Tag muss **exakt** `v` + die Version aus dem Plugin-Kopf sein — sonst
+  scheitert der Versionsvergleich still.
+- Ohne hochgeladene `.zip` passiert nichts. GitHubs „Source code (zip)" zählt
+  bewusst nicht.
+- Der Ordner **im** Archiv muss dem Installationsordner entsprechen, sonst
+  installiert WordPress das Plugin unter neuem Namen und lässt das alte
+  deaktiviert zurück.
+
+Seit PR #2 sind alle drei Punkte im Workflow verdrahtet — von Hand sollte
+kein Release mehr entstehen.
 
 ---
 
@@ -281,9 +356,28 @@ Beides ungeprüft, weil biospargel.org aus der Sandbox nicht erreichbar ist.
 
 - Customizer → Zusätzliches CSS enthält noch die alten `.btn`-Regeln.
   Seit 1.3.0 redundant, kann gelöscht werden.
-- Erstes GitHub-Release muss noch angelegt werden — Zip für 1.8.0 ist gebaut,
-  Release + Asset-Upload muss von Hand im GitHub-UI passieren.
 - Kennwortschutz ist noch aktiv — vor dem Livegang deaktivieren.
+- Test des Sofort-CSS für das Buchungs-Popup steht aus (siehe unten).
+
+### Buchungs-Popup → eigene Seite (Wunsch vom 21.08.2026)
+
+Der X-Button des Buchungs-Modals ist auf dem Handy schwer erreichbar, das
+Feld zu groß. Gewünscht ist **kein Popup, sondern eine normale Seite**, die
+sich im Block-Editor bearbeiten lässt.
+
+Das ist auch fachlich die bessere Lösung: kein Scroll-Lock, keine Fokusfalle,
+funktionierender Zurück-Button.
+
+**Blockiert durch fehlenden Quellcode.** Das Modal kommt aus dem mu-Plugin.
+Bekannt sind nur die aus dem HTML rekonstruierten Klassen (`.rc-overlay`,
+`.rc-modal`, `#rc-open`, `#rc-confirm`, `#rc-again`) — **der Schließen-Button
+ist nicht darunter**. Blind CSS dafür zu schreiben ist genau der Fehler, der
+1.4.0–1.6.0 wirkungslos gemacht hat.
+
+Als Zwischenschritt wurde ein CSS-Schnipsel zum Test in den Customizer
+gegeben (`max-height: 85vh` + `overflow-y: auto` auf `.rc-modal`). Wirkt es,
+stimmen die rekonstruierten Klassennamen; wirkt es nicht, sind sie falsch —
+beides ist ein verwertbarer Befund.
 
 ---
 
@@ -335,5 +429,8 @@ CPT:            rc_booking
 Meta:           _rc_slot, _rc_cat, _rfat_status (unseres)
 Shortcodes:     [repairffm_booking] (Kern), [rfat_manage_booking] (unseres)
 Admin-Seite:    edit.php?post_type=rc_booking&page=rfat-overview
-Transient:      rfat_github_release
+Transients:     rfat_github_release (6 h), rfat_menu_items (12 h)
+Handy-Menü:     .rfat-nav-open, .rfat-nav-overlay, .rfat-nav-link
+Diagnose:       <html class="rfat-nav-core"> oder "rfat-nav-fallback"
+Workflow:       .github/workflows/release.yml (Auslöser: Version im Plugin-Kopf)
 ```
