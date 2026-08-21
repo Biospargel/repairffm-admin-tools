@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.9.4
+ * Version: 1.9.5
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -487,6 +487,10 @@ function rfat_render_overview_page() {
                             <span style="color:#b3402f;font-weight:600;">fehlgeschlagen</span>.
                             <?php if (!empty($log['error'])): ?>
                                 <br /><code><?php echo esc_html($log['error']); ?></code>
+                                <?php $hint = rfat_explain_mail_error($log['error']); ?>
+                                <?php if ($hint !== ''): ?>
+                                    <br /><strong>Was das heißt:</strong> <?php echo esc_html($hint); ?>
+                                <?php endif; ?>
                             <?php endif; ?>
                         <?php endif; ?>
                     <?php endif; ?>
@@ -2669,6 +2673,38 @@ function rfat_send_logged($to, $subject, $body) {
     rfat_log_notify($ok, (array) $to, $error);
 
     return $ok;
+}
+
+/**
+ * Eine Fehlermeldung von wp_mail in Klartext übersetzen.
+ *
+ * "Die E-Mail-Funktion konnte nicht instanziiert werden" ist PHPMailers
+ * "Could not instantiate mail function" — für Nichtentwickler unlesbar,
+ * dabei ist die Aussage eindeutig und die Lösung immer dieselbe. Wer die
+ * Meldung nicht deuten kann, sucht sonst tagelang beim falschen Verdächtigen.
+ *
+ * @return string Erklärung, oder leer wenn wir die Meldung nicht kennen.
+ */
+function rfat_explain_mail_error($message) {
+    $m = strtolower((string) $message);
+
+    if (strpos($m, 'instanziiert') !== false || strpos($m, 'instantiate') !== false) {
+        return 'Der Server hat den Versand gar nicht erst versucht: Die PHP-Funktion '
+             . 'mail() ist bei deinem Hoster abgeschaltet oder nicht eingerichtet. '
+             . 'Das ist bei günstigem Hosting die Regel. Daran lässt sich vom '
+             . 'Plugin aus nichts ändern — nötig ist ein SMTP-Versand, also ein '
+             . 'echtes Postfach, über das WordPress verschickt.';
+    }
+    if (strpos($m, 'smtp') !== false && (strpos($m, 'auth') !== false || strpos($m, 'password') !== false)) {
+        return 'Der SMTP-Zugang wurde abgelehnt. Benutzername oder Passwort stimmen '
+             . 'nicht, oder der Anbieter verlangt ein eigenes App-Passwort statt des '
+             . 'normalen Kennworts.';
+    }
+    if (strpos($m, 'connect') !== false || strpos($m, 'verbindung') !== false) {
+        return 'Der Mailserver war nicht erreichbar. Oft blockiert der Hoster den '
+             . 'ausgehenden Port; Port 587 statt 465 hilft in vielen Fällen.';
+    }
+    return '';
 }
 
 /**
