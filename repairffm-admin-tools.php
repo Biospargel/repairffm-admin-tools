@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ganz ohne Name/E-Mail. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.8.3
+ * Version: 1.8.4
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -26,12 +26,28 @@ if (!defined('ABSPATH')) {
 define('RFAT_STATUS_META', '_rfat_status');
 define('RFAT_NONCE_ACTION', 'rfat_save_booking');
 
+/*
+ * Freiwillige E-Mail-Benachrichtigung.
+ *
+ * Die Seite wirbt mit "ganz anonym, ohne Name, ohne E-Mail". Das bleibt der
+ * Normalfall: Ohne Eintrag ändert sich nichts, der Code bleibt das einzige
+ * Credential. Wer benachrichtigt werden möchte, trägt seine Adresse selbst
+ * ein — und entscheidet mit einem zweiten, getrennten Haken, ob sie über den
+ * Termin hinaus gespeichert bleiben darf.
+ *
+ * Ohne diesen Haken löscht rfat_cleanup_emails() die Adresse nach dem Termin
+ * automatisch. Zwei Entscheidungen, zwei Häkchen — nicht eines für beides.
+ */
+define('RFAT_EMAIL_META', '_rfat_email');
+define('RFAT_EMAIL_KEEP_META', '_rfat_email_keep');
+define('RFAT_CLEANUP_HOOK', 'rfat_cleanup_emails');
+
 // Internal WP core meta keys we never want to show/edit.
 function rfat_meta_blocklist() {
     return [
         '_edit_lock', '_edit_last', '_wp_old_slug', '_wp_old_date',
         '_wp_page_template', '_thumbnail_id', '_wp_desired_post_slug',
-        RFAT_STATUS_META,
+        RFAT_STATUS_META, RFAT_EMAIL_META, RFAT_EMAIL_KEEP_META,
     ];
 }
 
@@ -395,7 +411,30 @@ function rfat_render_overview_page() {
                             echo $details ? implode('<br />', $details) : '<em>—</em>';
                             ?>
                         </td>
-                        <td><code><?php echo esc_html($analysis['code']['value'] ?? '—'); ?></code></td>
+                        <td>
+                            <code><?php echo esc_html($analysis['code']['value'] ?? '—'); ?></code>
+                            <?php
+                            /*
+                             * Freiwillig hinterlassene Adresse. Steht bewusst
+                             * hier und nicht unter den erkannten Feldern: Sie
+                             * darf nicht versehentlich mitbearbeitet werden,
+                             * und ob sie über den Termin hinaus bleiben darf,
+                             * hat allein der Besucher entschieden.
+                             */
+                            $mail = (string) get_post_meta($p->ID, RFAT_EMAIL_META, true);
+                            if ($mail !== '') :
+                                $keep = get_post_meta($p->ID, RFAT_EMAIL_KEEP_META, true) === '1';
+                                ?>
+                                <div style="margin-top:6px;font-size:12px;line-height:1.5;">
+                                    <a href="mailto:<?php echo esc_attr($mail); ?>"><?php echo esc_html($mail); ?></a><br />
+                                    <span style="color:<?php echo $keep ? '#5b6b62' : '#8a6d1f'; ?>;">
+                                        <?php echo $keep
+                                            ? 'darf gespeichert bleiben'
+                                            : 'wird nach dem Termin gelöscht'; ?>
+                                    </span>
+                                </div>
+                            <?php endif; ?>
+                        </td>
                         <td>
                             <span style="display:inline-block;padding:3px 10px;border-radius:999px;background:<?php echo esc_attr(rfat_status_color($status)); ?>;color:#fff;font-weight:600;font-size:12px;">
                                 <?php echo esc_html(rfat_status_label($status)); ?>
@@ -597,6 +636,15 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         if (wp_verify_nonce($_POST['_wpnonce'], 'rfat_pub_cancel_' . rfat_normalize_code($code_value))) {
             $match = rfat_find_booking_by_code($code_value);
             if ($match) {
+                /*
+                 * Der Termin findet nicht statt — damit entfällt der Zweck,
+                 * für den die Adresse erhoben wurde. Sie geht sofort mit,
+                 * es sei denn, weitere Speicherung wurde ausdrücklich erlaubt.
+                 */
+                if (get_post_meta($match['post']->ID, RFAT_EMAIL_KEEP_META, true) !== '1') {
+                    delete_post_meta($match['post']->ID, RFAT_EMAIL_META);
+                    delete_post_meta($match['post']->ID, RFAT_EMAIL_KEEP_META);
+                }
                 wp_trash_post($match['post']->ID);
                 $notice = '<div class="rfat-pub-notice rfat-pub-success">Dein Termin wurde storniert. Der Slot ist jetzt wieder frei für andere.</div>';
                 $code_value = ''; // Clear so the lookup form shows fresh.
@@ -635,6 +683,46 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         }
     }
 
+    // Freiwillige E-Mail speichern oder entfernen.
+    if (!empty($_POST['rfat_pub_action']) && $_POST['rfat_pub_action'] === 'email'
+        && !empty($_POST['rfat_pub_code']) && !empty($_POST['_wpnonce'])) {
+        $code_value = sanitize_text_field(wp_unslash($_POST['rfat_pub_code']));
+        if (!wp_verify_nonce($_POST['_wpnonce'], 'rfat_pub_email_' . rfat_normalize_code($code_value))) {
+            $notice = '<div class="rfat-pub-notice rfat-pub-error">Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.</div>';
+        } else {
+            $match = rfat_find_booking_by_code($code_value);
+            if (!$match) {
+                $notice = '<div class="rfat-pub-notice rfat-pub-error">Dieser Code wurde nicht gefunden.</div>';
+            } else {
+                $pid   = $match['post']->ID;
+                $email = isset($_POST['rfat_pub_email'])
+                    ? sanitize_email(wp_unslash($_POST['rfat_pub_email'])) : '';
+                $keep  = !empty($_POST['rfat_pub_email_keep']);
+
+                if ($email === '') {
+                    // Leeres Feld heißt: wieder löschen.
+                    delete_post_meta($pid, RFAT_EMAIL_META);
+                    delete_post_meta($pid, RFAT_EMAIL_KEEP_META);
+                    $notice = '<div class="rfat-pub-notice rfat-pub-success">Deine E-Mail-Adresse wurde gelöscht. Dein Termin bleibt bestehen.</div>';
+                } elseif (!is_email($email)) {
+                    $notice = '<div class="rfat-pub-notice rfat-pub-error">Das sieht nicht nach einer gültigen E-Mail-Adresse aus.</div>';
+                } else {
+                    update_post_meta($pid, RFAT_EMAIL_META, $email);
+                    if ($keep) {
+                        update_post_meta($pid, RFAT_EMAIL_KEEP_META, '1');
+                    } else {
+                        delete_post_meta($pid, RFAT_EMAIL_KEEP_META);
+                    }
+                    $notice = '<div class="rfat-pub-notice rfat-pub-success">Gespeichert. '
+                        . ($keep
+                            ? 'Deine Adresse bleibt gespeichert, bis du sie hier wieder löschst.'
+                            : 'Deine Adresse wird nach dem Termin automatisch gelöscht.')
+                        . '</div>';
+                }
+            }
+        }
+    }
+
     // Lookup per Formular.
     if (!empty($_POST['rfat_pub_action']) && $_POST['rfat_pub_action'] === 'lookup' && !empty($_POST['rfat_pub_code'])) {
         $code_value = sanitize_text_field(wp_unslash($_POST['rfat_pub_code']));
@@ -654,6 +742,17 @@ add_shortcode('rfat_manage_booking', function ($atts) {
      */
     if ($code_value === '' && !empty($_GET['code'])) {
         $code_value = sanitize_text_field(wp_unslash($_GET['code']));
+    }
+
+    /*
+     * WordPress' Cron läuft nur bei Seitenaufrufen; auf einer ruhigen Seite
+     * kann die Löschung dadurch liegen bleiben. Diese Seite wird von
+     * Besuchern angesteuert, also räumen wir hier zusätzlich auf — gedeckelt
+     * auf einmal pro Tag, damit es keine Last erzeugt.
+     */
+    if (!get_transient('rfat_cleanup_ran')) {
+        set_transient('rfat_cleanup_ran', 1, DAY_IN_SECONDS);
+        rfat_cleanup_emails();
     }
 
     if ($code_value !== '') {
@@ -695,6 +794,32 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             .rfat-pub-reschedule { border: 2px dashed #d7e0da; border-radius: 18px; padding: 20px; margin-top: 20px; background: #fbfcfb; }
             .rfat-pub-reschedule ol { margin: 6px 0 0; padding-left: 20px; }
             .rfat-pub-reschedule li { margin-bottom: 4px; }
+
+            .rfat-pub-mail {
+                margin: 18px 0;
+                padding: 16px 18px;
+                border: 1px solid #e7ebe8;
+                border-radius: 16px;
+                background: #fff;
+            }
+            .rfat-pub-mail-label { display: block; font-weight: 700; font-size: 15px; color: #1c2a22; }
+            .rfat-pub-optional {
+                display: inline-block; margin-left: 6px; padding: 2px 9px;
+                border-radius: 999px; background: #e8f1eb; color: #1f5a38;
+                font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+                vertical-align: middle;
+            }
+            .rfat-pub-mail-intro { margin: 8px 0 12px; font-size: 13px; color: #5b6b62; line-height: 1.5; }
+            .rfat-pub-mail-input { max-width: 100%; }
+            .rfat-pub-keep {
+                display: flex; gap: 10px; align-items: flex-start;
+                margin: 12px 0; font-size: 13px; color: #1c2a22; line-height: 1.5;
+                cursor: pointer;
+            }
+            .rfat-pub-keep input { margin-top: 3px; flex-shrink: 0; width: 18px; height: 18px; }
+            .rfat-pub-keep em { display: block; color: #5b6b62; font-style: normal; }
+            .rfat-pub-mail-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+            .rfat-pub-mail-state { font-size: 12px; color: #5b6b62; line-height: 1.5; }
 
             .rfat-pub-share {
                 margin: 18px 0;
@@ -777,6 +902,53 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                     der einzige Weg zurück zu deinem Termin.
                 </p>
             </div>
+
+            <?php
+            $cur_email = (string) get_post_meta($post->ID, RFAT_EMAIL_META, true);
+            $cur_keep  = get_post_meta($post->ID, RFAT_EMAIL_KEEP_META, true) === '1';
+            ?>
+            <form method="post" class="rfat-pub-mail">
+                <?php wp_nonce_field('rfat_pub_email_' . $norm_code); ?>
+                <input type="hidden" name="rfat_pub_action" value="email" />
+                <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($norm_code); ?>" />
+
+                <label class="rfat-pub-mail-label" for="rfat-mail-<?php echo esc_attr($post->ID); ?>">
+                    Benachrichtigung per E-Mail <span class="rfat-pub-optional">freiwillig</span>
+                </label>
+                <p class="rfat-pub-mail-intro">
+                    Normalerweise speichern wir zu deinem Termin gar nichts – kein Name,
+                    keine Adresse. Wenn du über den weiteren Verlauf informiert werden
+                    möchtest, kannst du hier freiwillig eine E-Mail hinterlassen.
+                    Für den Termin selbst ist das nicht nötig.
+                </p>
+
+                <input class="rfat-pub-code-input rfat-pub-mail-input" type="email"
+                       id="rfat-mail-<?php echo esc_attr($post->ID); ?>"
+                       name="rfat_pub_email" placeholder="dein@beispiel.de"
+                       value="<?php echo esc_attr($cur_email); ?>" />
+
+                <label class="rfat-pub-keep">
+                    <input type="checkbox" name="rfat_pub_email_keep" value="1"
+                           <?php checked($cur_keep); ?> />
+                    <span>
+                        Meine Adresse darf auch <strong>nach dem Termin</strong> gespeichert bleiben.
+                        <em>Ohne Haken wird sie nach dem Termin automatisch gelöscht.</em>
+                    </span>
+                </label>
+
+                <div class="rfat-pub-mail-actions">
+                    <button type="submit" class="btn"><?php echo $cur_email !== '' ? 'Änderung speichern' : 'E-Mail speichern'; ?></button>
+                    <?php if ($cur_email !== ''): ?>
+                        <span class="rfat-pub-mail-state">
+                            Gespeichert: <strong><?php echo esc_html($cur_email); ?></strong> —
+                            <?php echo $cur_keep
+                                ? 'bleibt gespeichert, bis du sie löschst'
+                                : 'wird nach dem Termin gelöscht'; ?>.
+                            Zum Löschen einfach das Feld leeren und speichern.
+                        </span>
+                    <?php endif; ?>
+                </div>
+            </form>
 
             <div class="rfat-pub-actions">
                 <form method="post" onsubmit="return confirm('Diesen Termin wirklich stornieren?');">
@@ -1380,6 +1552,107 @@ add_action('wp_footer', function () {
     </script>
     <?php
 }, 999);
+
+/* =========================================================================
+ * AUFRÄUMEN DER FREIWILLIGEN E-MAIL-ADRESSEN
+ *
+ * Wer den Haken nicht gesetzt hat, dessen Adresse verschwindet nach dem
+ * Termin von selbst. Das ist kein Komfort, sondern die Bedingung, unter der
+ * sie überhaupt erhoben wurde — deshalb läuft es automatisch und nicht auf
+ * Zuruf.
+ *
+ * Kulanzfrist von einem Tag, damit eine Nachricht zum Abschluss des Termins
+ * noch verschickt werden kann, bevor die Adresse gelöscht wird.
+ * ========================================================================= */
+define('RFAT_EMAIL_GRACE', DAY_IN_SECONDS);
+
+/**
+ * Adressen entfernen, deren Termin vorbei ist und für die keine weitere
+ * Speicherung erlaubt wurde.
+ *
+ * @return int Anzahl der gelöschten Adressen.
+ */
+function rfat_cleanup_emails() {
+    $posts = get_posts([
+        'post_type'        => 'rc_booking',
+        'posts_per_page'   => 200,
+        'post_status'      => 'any',
+        'fields'           => 'ids',
+        'meta_query'       => [
+            [
+                'key'     => RFAT_EMAIL_META,
+                'compare' => 'EXISTS',
+            ],
+        ],
+        'suppress_filters' => false,
+    ]);
+    if (!$posts) {
+        return 0;
+    }
+
+    /*
+     * time() und nicht current_time('timestamp'): Letzteres liefert einen um
+     * die Zeitzone verschobenen Wert, DateTime::getTimestamp() dagegen einen
+     * echten Unix-Zeitstempel. Beides zu vergleichen ginge im Sommer um zwei
+     * Stunden daneben — dieselbe Falle wie beim Zeitzonen-Bug in 1.1.1.
+     */
+    $cutoff  = time() - RFAT_EMAIL_GRACE;
+    $removed = 0;
+
+    foreach ($posts as $post_id) {
+        // Ausdrücklich erlaubt: bleibt liegen.
+        if (get_post_meta($post_id, RFAT_EMAIL_KEEP_META, true) === '1') {
+            continue;
+        }
+
+        $analysis = rfat_analyse_booking($post_id);
+        $dt       = $analysis['datetime'];
+
+        /*
+         * Ohne erkennbares Datum lässt sich "nach dem Termin" nicht
+         * bestimmen. Dann greift das Alter des Eintrags als Notbremse —
+         * liegen bleiben darf die Adresse auf keinen Fall.
+         */
+        if ($dt) {
+            $ts = $dt->getTimestamp();
+        } else {
+            $ts = get_post_time('U', true, $post_id);
+            if (!$ts) {
+                continue;
+            }
+            $ts += 30 * DAY_IN_SECONDS;
+        }
+
+        if ($ts > $cutoff) {
+            continue;
+        }
+
+        delete_post_meta($post_id, RFAT_EMAIL_META);
+        delete_post_meta($post_id, RFAT_EMAIL_KEEP_META);
+        $removed++;
+    }
+
+    return $removed;
+}
+add_action(RFAT_CLEANUP_HOOK, 'rfat_cleanup_emails');
+
+/*
+ * WordPress' Cron läuft nur bei Seitenaufrufen. Auf einer ruhigen Seite kann
+ * sich die Löschung dadurch verzögern — deshalb zusätzlich beim Abruf einer
+ * Buchung (siehe Shortcode) und nicht allein auf den Zeitplan verlassen.
+ */
+add_action('init', function () {
+    if (!wp_next_scheduled(RFAT_CLEANUP_HOOK)) {
+        wp_schedule_event(time() + HOUR_IN_SECONDS, 'daily', RFAT_CLEANUP_HOOK);
+    }
+});
+
+register_deactivation_hook(__FILE__, function () {
+    $ts = wp_next_scheduled(RFAT_CLEANUP_HOOK);
+    if ($ts) {
+        wp_unschedule_event($ts, RFAT_CLEANUP_HOOK);
+    }
+});
 
 /* =========================================================================
  * NAVIGATION: "Termin abrufen" ins Menü + Overlay-Modus erzwingen
