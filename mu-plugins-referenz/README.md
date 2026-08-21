@@ -29,3 +29,27 @@ oeffentlichen Repo hat das nichts zu suchen.
 Slots: die naechsten vier Samstage. IT halbstuendlich 14:00-16:30,
 E-Bike stuendlich 14:00-16:00. Belegt ist ein Slot nur, solange eine
 Buchung den Status `publish` hat - Papierkorb gibt ihn also frei.
+
+
+## repairffm-core-NEU.php
+
+Vorgeschlagene Fassung zum Einspielen (Stand 21.08.2026). Geaendert sind
+**ausschliesslich Texte** - Buchungslogik, Slot-Berechnung und AJAX sind
+Zeile fuer Zeile identisch.
+
+| Was | Warum |
+|---|---|
+| Impressum mit echten Daten | Platzhalter `[Name]`, `[Strasse]` usw. waren nie ersetzt |
+| Haftung bei Reparaturen | Der einzige Haftungsabschnitt, der hier wirklich etwas bewirkt |
+| Datenschutz: E-Mail-Abschnitt | Freiwillige Adresse seit Plugin 1.8.4 |
+| "weder Name noch E-Mail" entfernt | Stimmte mit dem E-Mail-Feld nicht mehr |
+| Dialog: "Termin vorgemerkt" | Termine gelten erst nach Zusage |
+| `rc_setup_version` 3 -> 4 | **Ohne diesen Sprung passiert gar nichts** |
+
+Einspielen: Datei auf dem Server nach `repairffm-core.php` kopieren, dann
+eine beliebige Seite aufrufen. Das Hochzaehlen der Setup-Version sorgt
+dafuer, dass Impressum und Datenschutz neu geschrieben werden.
+
+> Achtung: Dabei werden die WordPress-Seiten **ueberschrieben**. Eigene
+> Aenderungen, die dort direkt vorgenommen wurden, gehen verloren - genau
+> deshalb gehoeren die Texte hierher und nicht in den Seiteneditor.
