@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.15.0
+Stand: 21.08.2026 · Plugin-Version 1.16.0
 
 ---
 
@@ -316,6 +316,7 @@ Versionssprung zum ersten Mal.
 | 1.14.0 | Logo und Seitentitel verschont (1.13.0 nahm sie mit); Theme-Menü wird **serverseitig entfernt** statt versteckt — kein Aufblitzen, 149 Zeilen weniger |
 | 1.14.1 | Balken hinter dem Hamburger entfernt (schnitt beim Scrollen durch den Text); Versatz für die Adminleiste richtiggestellt |
 | 1.15.0 | Weniger Datenbank-Zugriffe (Meta-Batching, zwei kurze Caches); CSS wird **beim Ausliefern** gestrichen statt in der Quelle |
+| 1.16.0 | Buchung führt **direkt** auf `/termin-abrufen/` — Zwischenseite und zweites E-Mail-Formular entfallen (183 Zeilen weniger) |
 
 ---
 
@@ -685,6 +686,43 @@ Zeilen.
 | `<header>` außen, `<nav>` innen | nur das `<nav>`, Header unberührt |
 | Fließtext mit einem Menülink | unberührt |
 | nur Logo- und Titel-Link | unberührt |
+
+---
+
+### Ein Termin, eine Seite (1.16.0)
+
+Nach dem Buchen gab es eine Zwischenseite: Code, ein E-Mail-Feld, ein
+Kalender-Knopf und ein Link „Zur Terminübersicht". Wer etwas ändern wollte,
+musste erst dort weiterklicken.
+
+Die Buchung leitet jetzt direkt auf `/termin-abrufen/?code=…&neu=1`. Diese
+Seite zeigt **alles, was die Zwischenseite zeigte** — Termin, Code, das
+freiwillige E-Mail-Feld mit Einwilligungs-Häkchen, den Kalender-Knopf, den
+persönlichen Link — und zusätzlich Verschieben und Absagen.
+
+**Was dabei entfiel** (183 Zeilen netto):
+
+- `rc_step_done()` samt `rc_booking_by_code()`
+- der Hook `repairffm_after_booking` und `rfat_after_booking_box()` —
+  ein zweites E-Mail-Formular für dieselbe Sache
+- dessen POST-Handler und das komplette `.rfat-ab-*`-CSS
+
+`/termin-buchen/?code=…` leitet per **301** auf die Abruf-Seite um, damit
+alte Lesezeichen und der Zurück-Knopf weiter funktionieren.
+
+> **Neu abgesichert:** `/termin-abrufen/` wurde bisher **nirgends angelegt**
+> — die Seite existierte nur, weil sie einmal von Hand erstellt worden war.
+> Verlinkt wird sie an einem Dutzend Stellen (Bestätigungsmails,
+> Abmeldelink, Kalendereintrag), und seit die Buchung dorthin führt, hängt
+> der ganze Ablauf daran. Ein `init`-Lauf legt sie jetzt an, falls sie
+> fehlt, veröffentlicht sie wieder, falls sie im Papierkorb liegt, und
+> hängt den Shortcode an, falls er fehlt — **ohne** vorhandenen Text zu
+> überschreiben. Einmalig, über die Option `rfat_abrufseite` gedeckelt.
+
+Der Hinweis „Termin vorgemerkt, bitte auf die Bestätigung warten" wandert
+mit: `?neu=1` blendet ihn oben auf der Abruf-Seite ein. Der Code darf nicht
+kommentarlos verschwinden — er ist das Einzige, womit man später wieder an
+den Termin kommt.
 
 ---
 
