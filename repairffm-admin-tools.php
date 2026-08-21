@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.9.5
+ * Version: 1.9.6
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1903,6 +1903,19 @@ add_action('wp_footer', function () {
             window.requestAnimationFrame(function () {
                 rcPending = false;
                 rcSync();
+                /*
+                 * Getrennt von rcSync aufrufen, und zwar bei JEDER Mutation.
+                 *
+                 * rcSync bricht ab, wenn sich der Offen-Zustand nicht
+                 * geändert hat — richtig für den Menüknopf, falsch hier:
+                 * Das Overlay bleibt vom ersten Schritt bis zur Bestätigung
+                 * durchgehend offen. Der Buchungscode taucht erst am Ende
+                 * auf, also lange nach dem einzigen Zustandswechsel.
+                 *
+                 * Der Aufruf ist billig: Steht schon ein Block mit demselben
+                 * Code, kehrt die Funktion sofort zurück.
+                 */
+                rcAfterBooking();
             });
         }
 

@@ -22,6 +22,34 @@ jobs:
       - name: PHP-Syntax prüfen
         run: php -l repairffm-admin-tools.php
 
+      # Zweimal ist bereits Code auf main gelandet, der nichts tat: einmal
+      # ein vergessener Versions-Bump, einmal eine Funktion im eingebetteten
+      # JavaScript, die definiert, aber nie aufgerufen wurde. Beides fiel
+      # niemandem auf, weil beides syntaktisch einwandfrei ist.
+      - name: Tote Funktionen im eingebetteten JavaScript
+        run: |
+          python3 - <<'EOF'
+          import io, re, sys
+
+          src = io.open('repairffm-admin-tools.php', encoding='utf-8').read()
+          blocks = re.findall(r'<script[^>]*>(.*?)</script>', src, re.S)
+          js = '\n'.join(blocks)
+
+          tot = []
+          for name in set(re.findall(r'function\s+([A-Za-z_$][\w$]*)\s*\(', js)):
+              # Definition plus mindestens ein weiterer Treffer = wird benutzt
+              if len(re.findall(r'\b' + re.escape(name) + r'\b', js)) < 2:
+                  tot.append(name)
+
+          if tot:
+              for name in sorted(tot):
+                  print('::error::%s() ist im eingebetteten JavaScript definiert, '
+                        'wird aber nirgends aufgerufen.' % name)
+              sys.exit(1)
+
+          print('Keine toten Funktionen gefunden.')
+          EOF
+
       - name: Version aus dem Plugin-Kopf lesen
         id: version
         run: |
