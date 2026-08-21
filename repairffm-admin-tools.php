@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.13.1
+ * Version: 1.14.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1618,8 +1618,25 @@ add_action('wp_head', function () {
          * Seite völlig ohne Navigation.
          */
         /*
-         * Das Ausblenden der Theme-Menüpunkte steht jetzt im Skript unten,
-         * nicht mehr hier. Zweimal hatte an dieser Stelle ein geratener
+         * Das serverseitig markierte Theme-Menü. Diese Regel steht im
+         * Kopf und greift damit, bevor die Seite gezeichnet wird — genau
+         * deshalb blitzen die Knöpfe nicht mehr auf.
+         */
+        @media (max-width: 600px) {
+            .rfat-theme-nav {
+                display: none !important;
+            }
+        }
+        /* Bringt das Theme doch ein eigenes Handy-Menü mit, nimmt das
+           Skript unsere Leiste weg — dann muss das Menü des Themes
+           natürlich stehen bleiben. */
+        .rfat-nav-core .rfat-theme-nav {
+            display: block !important;
+        }
+
+        /*
+         * Ein Auffangnetz bleibt im Skript unten: Nicht jeder Seitenkopf
+         * läuft über die Block-Ausgabe. Zweimal hatte an dieser Stelle ein geratener
          * Selektor gestanden (`header nav.wp-block-navigation`), zweimal
          * ohne jede Wirkung — das Markup des Themes ist uns unbekannt und
          * von hier aus nicht einsehbar. Über die Adressen der Menüpunkte
@@ -2686,6 +2703,112 @@ register_deactivation_hook(__FILE__, function () {
  * tatsächlich ein core/navigation-Block ist — ist sie das nicht, übernimmt
  * das eigenständige Handy-Menü weiter unten.
  * ========================================================================= */
+/* =========================================================================
+ * DAS MENÜ DES THEMES SCHON BEIM AUSLIEFERN MARKIEREN
+ *
+ * Bis 1.13.1 hat das ein Skript im Seitenfuß erledigt. Das funktionierte,
+ * war aber sichtbar: Die vier Knöpfe standen kurz da und verschwanden dann
+ * — das HTML war längst gezeichnet, bevor das Skript überhaupt lief.
+ *
+ * Hier passiert es beim Rendern, also bevor irgendetwas beim Besucher
+ * ankommt. Erkannt wird wie im Skript über Adresse UND Beschriftung der
+ * Menüpunkte, nicht über geratene Klassennamen.
+ *
+ * Der Block wird nur eingepackt, nicht entfernt. Ob er verschwindet,
+ * entscheidet CSS anhand der Fensterbreite — am Server wissen wir nicht,
+ * wie breit das Gerät ist, und auf dem Desktop soll die Navigation
+ * stehen bleiben.
+ * ========================================================================= */
+
+/**
+ * Pfadteil einer Adresse, ohne Schrägstrich am Ende — wie im Skript.
+ */
+function rfat_url_pfad($url) {
+    $pfad = wp_parse_url((string) $url, PHP_URL_PATH);
+    if (!is_string($pfad)) {
+        return null;
+    }
+    $pfad = rtrim($pfad, '/');
+    return $pfad === '' ? '/' : $pfad;
+}
+
+function rfat_text_normalisieren($text) {
+    $text = wp_strip_all_tags(html_entity_decode((string) $text, ENT_QUOTES, 'UTF-8'));
+    return trim(preg_replace('/\s+/u', ' ', mb_strtolower($text)));
+}
+
+/**
+ * Pfad => Liste der Beschriftungen, unter denen dieser Punkt im Menü steht.
+ */
+function rfat_menu_ziele() {
+    static $ziele = null;
+    if ($ziele !== null) {
+        return $ziele;
+    }
+    $ziele = [];
+    foreach (rfat_get_menu_items() as $item) {
+        $pfad = rfat_url_pfad($item['url']);
+        if ($pfad === null) {
+            continue;
+        }
+        $ziele[$pfad][] = rfat_text_normalisieren($item['label']);
+    }
+    return $ziele;
+}
+
+add_filter('render_block', function ($content, $block) {
+    if (is_admin() || is_feed() || !empty($GLOBALS['rfat_nav_markiert'])) {
+        return $content;
+    }
+    // Billiger Vorabtest, damit die Masse der Blöcke sofort durch ist.
+    if ($content === '' || strpos($content, '<a ') === false) {
+        return $content;
+    }
+
+    $ziele = rfat_menu_ziele();
+    if (count($ziele) < 2) {
+        return $content;
+    }
+
+    if (!preg_match_all('/<a\b[^>]*href=([\"\'])(.*?)\1[^>]*>(.*?)<\/a>/is', $content, $treffer, PREG_SET_ORDER)) {
+        return $content;
+    }
+
+    $passend = 0;
+    $linktext = 0;
+    foreach ($treffer as $t) {
+        // Bildlinks sind nie Menüpunkte — das ist das Logo.
+        if (preg_match('/<(img|svg|picture)\b/i', $t[3])) {
+            continue;
+        }
+        $pfad = rfat_url_pfad($t[2]);
+        $text = rfat_text_normalisieren($t[3]);
+        if ($pfad !== null && isset($ziele[$pfad]) && in_array($text, $ziele[$pfad], true)) {
+            $passend++;
+            $linktext += mb_strlen($text);
+        }
+    }
+
+    // Unter zwei Treffern ist die Sache nicht eindeutig genug.
+    if ($passend < 2) {
+        return $content;
+    }
+
+    /*
+     * Dieselbe Sicherung wie im Skript: Steht im Block merklich mehr als
+     * die Menüpunkte, steckt vermutlich der Seitentitel mit drin. Dann
+     * lieber nichts anfassen und dem Skript im Fuß den Vortritt lassen —
+     * das kann einzelne Links ausblenden, ein Block nicht.
+     */
+    $gesamt = mb_strlen(rfat_text_normalisieren($content));
+    if ($gesamt > $linktext * 2 + 40) {
+        return $content;
+    }
+
+    $GLOBALS['rfat_nav_markiert'] = true;
+    return '<div class="rfat-theme-nav" data-rfat-treffer="' . (int) $passend . '">' . $content . '</div>';
+}, 10, 2);
+
 add_filter('render_block_data', function ($block) {
     if (($block['blockName'] ?? '') === 'core/navigation') {
         // 'mobile' ist zwar WordPress-Default, aber Themes setzen hier
@@ -2954,7 +3077,7 @@ add_action('wp_footer', function () {
             document.documentElement.classList.add('rfat-nav-core');
             topbar.parentNode.removeChild(topbar);
             overlay.parentNode.removeChild(overlay);
-            return;
+            return;   // .rfat-nav-core blendet das Theme-Menü wieder ein
         }
         document.documentElement.classList.add('rfat-nav-fallback');
         topbar.hidden = false;
@@ -3068,7 +3191,16 @@ add_action('wp_footer', function () {
             return { anzahl: treffer.length, art: 'einzeln', grund: grund };
         }
 
-        var versteckt = themeMenuAusblenden();
+        /*
+         * Hat der Server das Menü schon markiert, ist hier nichts mehr zu
+         * tun — das CSS im Kopf erledigt es ohne Aufblitzen. Das Skript
+         * springt nur ein, wenn der Kopf nicht über die Block-Ausgabe
+         * läuft und die Markierung deshalb fehlt.
+         */
+        var vorMarkiert = document.querySelector('.rfat-theme-nav');
+        var versteckt = vorMarkiert
+            ? { anzahl: Number(vorMarkiert.getAttribute('data-rfat-treffer')) || 0, art: 'schon vom Server' }
+            : themeMenuAusblenden();
 
         /*
          * Nur für uns, und nur auf ausdrücklichen Wunsch: Wenn oben doch

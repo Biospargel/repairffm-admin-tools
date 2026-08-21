@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.13.1
+Stand: 21.08.2026 · Plugin-Version 1.14.0
 
 ---
 
@@ -313,7 +313,7 @@ Versionssprung zum ersten Mal.
 | 1.11.0 | **Buchung ist eine echte Seite** — Popup, Overlay-CSS und MutationObserver entfernt |
 | 1.12.0 | **Buchung ins Plugin geholt** — aktualisiert sich über GitHub; Schrittanzeige; Einleitung ab Schritt 2 aus |
 | 1.13.0 | Kopfleiste mit großem Hamburger, schrumpft beim Scrollen; Theme-Menü über die **Adressen** ausgeblendet statt über geratene Klassen |
-| 1.13.1 | Logo und Seitentitel beim Ausblenden verschont — 1.13.0 nahm sie mit |
+| 1.14.0 | Logo und Seitentitel verschont (1.13.0 nahm sie mit); Theme-Menü wird **serverseitig** markiert, deshalb blitzt es nicht mehr auf |
 
 ---
 
@@ -622,6 +622,49 @@ In allen fünf Fällen blieben Seitentitel und Logo stehen.
 > (nur als Administrator). Unten links steht dann, was gefunden und was
 > ausgeblendet wurde. Ein Screenshot davon genügt, um es zu beheben — genau
 > das hatte beim Schließen-Knopf des alten Popups die Raterei beendet.
+
+### Kein Aufblitzen mehr: serverseitig statt im Fuß (1.14.0)
+
+Die vier Knöpfe verschwanden zwar, aber **sichtbar**: Sie standen beim Laden
+kurz da und wurden dann weggeschaltet. Kein Rätsel — das Skript lag im
+Seitenfuß, das HTML des Kopfes war längst gezeichnet, bevor es überhaupt
+lief.
+
+Die Erkennung läuft deshalb jetzt zusätzlich beim Rendern, über den
+`render_block`-Filter, nach denselben Regeln wie im Skript (Adresse **und**
+Beschriftung, Bildlinks übersprungen, dieselbe Textlängen-Sicherung).
+
+**Der Block wird nur eingepackt, nicht entfernt:**
+
+```php
+return '<div class="rfat-theme-nav" data-rfat-treffer="4">' . $content . '</div>';
+```
+
+Am Server wissen wir nicht, wie breit das Gerät ist. Ob das Menü
+verschwindet, entscheidet deshalb weiter CSS — aber eine Regel im `<head>`,
+die vor dem ersten Zeichnen greift. Auf dem Desktop bleibt die Navigation
+dadurch stehen.
+
+Das Skript im Fuß bleibt als Auffangnetz für Köpfe, die nicht über die
+Block-Ausgabe laufen. Findet es `.rfat-theme-nav` vor, tut es nichts.
+
+Bringt das Theme wider Erwarten ein eigenes Handy-Menü mit, entfernt das
+Skript unsere Leiste und setzt `rfat-nav-core` — und
+`.rfat-nav-core .rfat-theme-nav { display: block }` holt das Theme-Menü
+zurück. Sonst stünde man ohne jede Navigation da.
+
+**Geprüft** (PHP-Seite, sechs Blockformen):
+
+| Block | Ergebnis |
+|---|---|
+| `<ul>` mit den vier Punkten | eingepackt |
+| Buttons-Block | eingepackt |
+| Container mit Titel **und** Links | unberührt → Skript übernimmt |
+| `<header>` außen, `<nav>` innen | nur das `<nav>`, Header unberührt |
+| Fließtext mit einem Menülink | unberührt |
+| nur Logo- und Titel-Link | unberührt |
+
+---
 
 ### Kopfleiste und Hamburger (1.13.0)
 
