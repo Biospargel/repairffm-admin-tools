@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.12.0
+ * Version: 1.13.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1407,28 +1407,117 @@ add_action('wp_head', function () {
             box-sizing: border-box !important;
         }
 
-        /* ============ Eigenständiges Handy-Menü (siehe wp_footer unten) ============ */
-        .rfat-nav-open {
+        /* ============ Eigenständiges Handy-Menü (siehe wp_footer unten) ============
+         *
+         * Der Knopf sitzt in einer eigenen Leiste am oberen Rand. Beim
+         * Herunterscrollen schrumpft sie: oben auf der Seite ist Platz für
+         * eine große Trefferfläche, weiter unten soll sie möglichst wenig
+         * vom Inhalt verdecken.
+         */
+        .rfat-topbar {
             display: none;
             position: fixed;
-            top: 12px;
-            right: 12px;
+            top: 0;
+            left: 0;
+            right: 0;
             z-index: 99998;
+            justify-content: flex-end;
+            align-items: center;
+            padding: 12px max(12px, env(safe-area-inset-right))
+                     12px max(12px, env(safe-area-inset-left));
+            background: rgba(255, 255, 255, 0);
+            /* Die Leiste selbst faengt keine Klicks ab - nur ihr Knopf. */
+            pointer-events: none;
+            transition: padding .18s ease, background-color .18s ease,
+                        box-shadow .18s ease;
+        }
+        .rfat-topbar.is-small {
+            padding-top: 7px;
+            padding-bottom: 7px;
+            background: rgba(255, 255, 255, .94);
+            box-shadow: 0 1px 12px rgba(28, 42, 34, .10);
+            backdrop-filter: saturate(1.4) blur(8px);
+            -webkit-backdrop-filter: saturate(1.4) blur(8px);
+        }
+        /*
+         * Der Knopf war weiss mit dünnem Rand — auf dem ohnehin weissen
+         * Seitenkopf ging er darin unter. Jetzt im Grün der Seite, damit
+         * er als das erkennbar ist, was er ist: die einzige Navigation.
+         */
+        .rfat-nav-open {
+            display: flex;
+            pointer-events: auto;
             align-items: center;
             justify-content: center;
-            width: 48px;
-            height: 48px;
+            width: 60px;
+            height: 60px;
             padding: 0;
-            border: 1px solid #cfd8d2;
-            border-radius: 12px;
-            background: #fff;
-            color: #1c2a22;
+            border: 0;
+            border-radius: 19px;
+            background: #2f7d4f;
             cursor: pointer;
-            box-shadow: 0 2px 10px rgba(28, 42, 34, .12);
+            box-shadow: 0 4px 16px rgba(31, 90, 56, .30);
+            transition: width .2s ease, height .2s ease, border-radius .2s ease,
+                        box-shadow .2s ease, transform .12s ease, background-color .2s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .rfat-nav-open:active { transform: scale(.93); }
+        .rfat-nav-open:focus-visible {
+            outline: 3px solid #1f5a38;
+            outline-offset: 3px;
+        }
+        .rfat-topbar.is-small .rfat-nav-open {
+            width: 44px;
+            height: 44px;
+            border-radius: 14px;
+            box-shadow: 0 2px 8px rgba(31, 90, 56, .26);
+        }
+
+        /*
+         * Drei einzelne Striche statt eines SVG-Pfades: nur so lassen sie
+         * sich beim Öffnen zum Kreuz zusammenlegen. Der mittlere ist etwas
+         * kürzer — das nimmt dem Symbol die Strenge.
+         */
+        .rfat-burger {
+            position: relative;
+            display: block;
+            width: 26px;
+            height: 18px;
+            transition: width .2s ease, height .2s ease;
+        }
+        .rfat-topbar.is-small .rfat-burger { width: 19px; height: 13px; }
+        .rfat-burger span {
+            position: absolute;
+            left: 0;
+            height: 2.5px;
+            width: 100%;
+            border-radius: 2px;
+            background: #fff;
+            transition: transform .26s cubic-bezier(.2, .7, .3, 1),
+                        opacity .16s ease, width .2s ease;
+        }
+        .rfat-burger span:nth-child(1) { top: 0; }
+        .rfat-burger span:nth-child(2) { top: 50%; margin-top: -1.25px; width: 68%; }
+        .rfat-burger span:nth-child(3) { bottom: 0; }
+        /* Beim Öffnen zum Kreuz — sichtbar, solange das Menü einblendet. */
+        .rfat-nav-open[aria-expanded="true"] .rfat-burger span:nth-child(1) {
+            transform: translateY(7.75px) rotate(45deg);
+        }
+        .rfat-nav-open[aria-expanded="true"] .rfat-burger span:nth-child(2) {
+            opacity: 0;
+            width: 100%;
+        }
+        .rfat-nav-open[aria-expanded="true"] .rfat-burger span:nth-child(3) {
+            transform: translateY(-7.75px) rotate(-45deg);
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .rfat-nav-open, .rfat-burger, .rfat-burger span, .rfat-topbar {
+                transition: none;
+            }
         }
         /* Eingeloggt schiebt die Adminleiste alles nach unten (mobil 46px hoch) */
-        body.admin-bar .rfat-nav-open {
-            top: 58px;
+        body.admin-bar .rfat-topbar {
+            top: 46px;
         }
         body.admin-bar .rfat-nav-overlay {
             top: 46px;
@@ -1528,24 +1617,20 @@ add_action('wp_head', function () {
          * Ohne diese Bedingung stünde jemand ohne JavaScript vor einer
          * Seite völlig ohne Navigation.
          */
-        @media (max-width: 600px) {
-            /*
-             * Ausdruecklich nur der Navigationsblock. "header nav" wäre
-             * verlockend kurz, würde aber jedes nav im Kopf treffen — und
-             * manche Themes stecken Logo oder Titel mit hinein. Was hier
-             * verschwindet, soll ausschließlich die Menüliste sein.
-             */
-            .rfat-nav-fallback header nav.wp-block-navigation,
-            .rfat-nav-fallback header .wp-block-navigation {
-                display: none !important;
-            }
-        }
+        /*
+         * Das Ausblenden der Theme-Menüpunkte steht jetzt im Skript unten,
+         * nicht mehr hier. Zweimal hatte an dieser Stelle ein geratener
+         * Selektor gestanden (`header nav.wp-block-navigation`), zweimal
+         * ohne jede Wirkung — das Markup des Themes ist uns unbekannt und
+         * von hier aus nicht einsehbar. Über die Adressen der Menüpunkte
+         * ist es dagegen eindeutig; die kennen wir aus unserem eigenen Menü.
+         */
 
         @media (max-width: 600px) {
             /* Nur auf dem Handy taucht der Hamburger auf. Das Skript nimmt
                das [hidden] weg, sobald klar ist, dass das Theme kein
                eigenes Menü mitbringt. */
-            .rfat-nav-open:not([hidden]) {
+            .rfat-topbar:not([hidden]) {
                 display: flex;
             }
 
@@ -2819,12 +2904,12 @@ add_action('wp_footer', function () {
         $current   = $permalink ? untrailingslashit($permalink) : '';
     }
     ?>
-    <button type="button" class="rfat-nav-open" id="rfat-nav-open"
-            aria-label="Menü öffnen" aria-expanded="false" aria-controls="rfat-nav-overlay" hidden>
-        <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path fill="currentColor" d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>
-        </svg>
-    </button>
+    <div class="rfat-topbar" id="rfat-topbar" hidden>
+        <button type="button" class="rfat-nav-open" id="rfat-nav-open"
+                aria-label="Menü öffnen" aria-expanded="false" aria-controls="rfat-nav-overlay">
+            <span class="rfat-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
+    </div>
 
     <div class="rfat-nav-overlay" id="rfat-nav-overlay" hidden>
         <div class="rfat-nav-overlay__bar">
@@ -2852,11 +2937,13 @@ add_action('wp_footer', function () {
     </div>
 
     <script id="rfat-mobile-nav">
+    window.rfatNavDiag = <?php echo (current_user_can('manage_options') && !empty($_GET['rfat_diag'])) ? 'true' : 'false'; ?>;
     (function () {
         var openBtn = document.getElementById('rfat-nav-open');
+        var topbar = document.getElementById('rfat-topbar');
         var overlay = document.getElementById('rfat-nav-overlay');
         var closeBtn = document.getElementById('rfat-nav-close');
-        if (!openBtn || !overlay || !closeBtn) { return; }
+        if (!openBtn || !topbar || !overlay || !closeBtn) { return; }
 
         /*
          * Bringt das Theme schon ein eigenes Handy-Menü mit? Dann unseres
@@ -2865,12 +2952,132 @@ add_action('wp_footer', function () {
         var themeToggle = document.querySelector('.wp-block-navigation__responsive-container-open');
         if (themeToggle) {
             document.documentElement.classList.add('rfat-nav-core');
-            openBtn.parentNode.removeChild(openBtn);
+            topbar.parentNode.removeChild(topbar);
             overlay.parentNode.removeChild(overlay);
             return;
         }
         document.documentElement.classList.add('rfat-nav-fallback');
-        openBtn.hidden = false;
+        topbar.hidden = false;
+
+        /*
+         * ---- Die Menüpunkte des Themes ausblenden ----
+         *
+         * Zweimal stand hier ein geratener CSS-Selektor
+         * (`header nav.wp-block-navigation`), zweimal ohne Wirkung: Das
+         * Markup des Themes kennen wir nicht, und von hier aus lässt es
+         * sich nicht nachsehen. Was wir sicher kennen, sind die Adressen
+         * der Menüpunkte — sie stehen in unserem eigenen Menü daneben.
+         *
+         * Also über die Adressen suchen statt über Klassennamen.
+         */
+        function pfad(href) {
+            if (!href) { return null; }
+            /* location.href als Bezug, nicht location.origin: bei manchen
+             * Kontexten ist origin "null", und dann wirft der Konstruktor -
+             * die Erkennung fiele still aus. */
+            try { return new URL(href, location.href).pathname.replace(/\/+$/, '') || '/'; }
+            catch (e) { return null; }
+        }
+
+        function themeMenuAusblenden() {
+            var gesucht = {};
+            var eigene = overlay.querySelectorAll('.rfat-nav-link');
+            for (var i = 0; i < eigene.length; i++) {
+                var p = pfad(eigene[i].getAttribute('href'));
+                if (p) { gesucht[p] = true; }
+            }
+
+            // Nur oberhalb des Inhalts suchen - Links im Text sollen bleiben.
+            var inhalt = document.querySelector('main, .wp-site-blocks > main, #content, #main');
+            var treffer = [];
+            var alle = document.querySelectorAll('a[href]');
+            for (var j = 0; j < alle.length; j++) {
+                var a = alle[j];
+                if (topbar.contains(a) || overlay.contains(a)) { continue; }
+                if (a.closest('#wpadminbar')) { continue; }
+                if (inhalt && (inhalt.contains(a) ||
+                    (inhalt.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING))) { continue; }
+                var pf = pfad(a.getAttribute('href'));
+                if (pf && gesucht[pf]) { treffer.push(a); }
+            }
+
+            // Unter zwei Treffern ist die Sache nicht eindeutig genug.
+            if (treffer.length < 2) { return { anzahl: treffer.length, art: 'zu wenige' }; }
+
+            // Kleinster gemeinsamer Vorfahr aller Treffer.
+            var huelle = treffer[0].parentNode;
+            for (var k = 1; k < treffer.length; k++) {
+                while (huelle && !huelle.contains(treffer[k])) { huelle = huelle.parentNode; }
+            }
+            if (!huelle || huelle === document.body ||
+                huelle === document.documentElement) {
+                return versteckeEinzeln(treffer, 'kein brauchbarer Container');
+            }
+
+            /*
+             * Sicherung: Der Container darf im Wesentlichen nur die
+             * Menüpunkte enthalten. Steckt der Seitentitel mit drin, wäre
+             * er sonst gleich mit weg - dann lieber nur die Links selbst.
+             */
+            var summe = 0;
+            for (var m = 0; m < treffer.length; m++) {
+                summe += (treffer[m].textContent || '').trim().length;
+            }
+            var gesamt = (huelle.textContent || '').trim().length;
+            if (gesamt > summe * 2 + 40) {
+                return versteckeEinzeln(treffer, 'Container enthielt mehr als das Menü');
+            }
+
+            huelle.style.display = 'none';
+            huelle.setAttribute('data-rfat-versteckt', '1');
+            return {
+                anzahl: treffer.length,
+                art: 'Container',
+                knoten: huelle.tagName.toLowerCase() +
+                        (huelle.className ? '.' + String(huelle.className).trim().split(/\s+/).join('.') : '')
+            };
+        }
+
+        function versteckeEinzeln(treffer, grund) {
+            for (var i = 0; i < treffer.length; i++) {
+                var el = treffer[i];
+                // Bis zum Listenpunkt hoch, falls es einer ist.
+                var li = el.closest('li');
+                (li || el).style.display = 'none';
+            }
+            return { anzahl: treffer.length, art: 'einzeln', grund: grund };
+        }
+
+        var versteckt = themeMenuAusblenden();
+
+        /*
+         * Nur für uns, und nur auf ausdrücklichen Wunsch: Wenn oben doch
+         * noch etwas stehen bleibt, sagt eine Zeile mit ?rfat_diag=1 in der
+         * Adresse, was gefunden wurde. Das erspart die Raterei von vorher.
+         */
+        if (window.rfatNavDiag) {
+            var d = document.createElement('div');
+            d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99999;max-width:92vw;' +
+                'background:#1c2a22;color:#fff;font:12px/1.45 monospace;padding:9px 11px;' +
+                'border-radius:9px;white-space:pre-wrap;';
+            d.textContent = 'Menue des Themes: ' + JSON.stringify(versteckt, null, 1);
+            document.body.appendChild(d);
+        }
+
+        /*
+         * Beim Herunterscrollen schrumpft die Leiste. Der Schwellwert liegt
+         * bewusst nicht bei 0, sonst flackert sie bei jedem Wackeln.
+         */
+        var klein = false;
+        function scrollPruefen() {
+            var soll = (window.pageYOffset || document.documentElement.scrollTop) > 40;
+            if (soll !== klein) {
+                klein = soll;
+                topbar.classList.toggle('is-small', klein);
+            }
+        }
+        scrollPruefen();
+        window.addEventListener('scroll', scrollPruefen, { passive: true });
 
         var lastFocus = null;
 

@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.12.0
+Stand: 21.08.2026 · Plugin-Version 1.13.0
 
 ---
 
@@ -312,6 +312,7 @@ Versionssprung zum ersten Mal.
 | 1.10.0 | Echte Meta-Keys des Buchungs-Plugins statt Raten |
 | 1.11.0 | **Buchung ist eine echte Seite** — Popup, Overlay-CSS und MutationObserver entfernt |
 | 1.12.0 | **Buchung ins Plugin geholt** — aktualisiert sich über GitHub; Schrittanzeige; Einleitung ab Schritt 2 aus |
+| 1.13.0 | Kopfleiste mit großem Hamburger, schrumpft beim Scrollen; Theme-Menü über die **Adressen** ausgeblendet statt über geratene Klassen |
 
 ---
 
@@ -563,6 +564,72 @@ versehentlich zurückgespieltes mu-Plugin legt die Seite nicht lahm.
   `?was`, `?wann` oder `?code` in der Adresse steht.
 - Der Haken auf der Fertig-Seite ist gezeichnet statt ✅ — das Emoji kam auf
   iOS als klobiger grüner Kasten.
+
+---
+
+### Das Theme-Menü ausblenden — über die Adressen, nicht über Klassennamen (1.13.0)
+
+**Zwei Anläufe waren wirkungslos**, beide aus demselben Grund. In 1.8.0 und
+1.9.6 stand hier ein geratener CSS-Selektor:
+
+```css
+.rfat-nav-fallback header nav.wp-block-navigation { display: none !important; }
+```
+
+Das Markup des Themes ist uns unbekannt und von der Entwicklungsumgebung aus
+nicht einsehbar — biospargel.org ist über den Proxy nicht erreichbar (403).
+Der Selektor traf schlicht nichts, und weil CSS bei einem Fehlschlag
+schweigt, fiel es erst über einen Screenshot auf. Zweimal.
+
+**Was wir dagegen sicher kennen, sind die Adressen der Menüpunkte** — sie
+stehen in unserem eigenen Menü daneben. Also sucht das Skript jetzt danach:
+
+1. Alle Adressen aus dem eigenen Menü einsammeln
+2. Links darauf finden, die *oberhalb* des Inhalts stehen (`main`, `#content`)
+3. Kleinsten gemeinsamen Vorfahr bestimmen und ausblenden
+
+**Die Sicherung** ist der wichtige Teil: Enthält dieser Container merklich
+mehr Text als die Menüpunkte zusammen (`gesamt > summe * 2 + 40`), steckt
+vermutlich der Seitentitel mit drin. Dann werden nur die Links selbst
+ausgeblendet, nicht der Container. Lieber ein leerer Streifen als ein
+verschwundener Titel.
+
+Unter zwei Treffern passiert nichts — das ist zu wenig, um sicher zu sein.
+
+**Gegengeprüft** mit Chromium gegen vier Theme-Strukturen, weil wir die
+echte nicht kennen:
+
+| Struktur | Ergebnis |
+|---|---|
+| `nav.wp-block-navigation` im `header` | `<ul>` ausgeblendet, Link im Fließtext bleibt |
+| Buttons-Block, gar kein `nav` | `div.wp-block-buttons` ausgeblendet |
+| Titel und Links im selben Container | Sicherung greift, Links einzeln aus, **Titel bleibt** |
+| gar kein Theme-Menü | nichts passiert, keine Fehlgriffe |
+
+In allen vier Fällen blieb der Seitentitel stehen.
+
+> **Wenn oben doch noch etwas steht:** `?rfat_diag=1` an die Adresse hängen
+> (nur als Administrator). Unten links steht dann, was gefunden und was
+> ausgeblendet wurde. Ein Screenshot davon genügt, um es zu beheben — genau
+> das hatte beim Schließen-Knopf des alten Popups die Raterei beendet.
+
+### Kopfleiste und Hamburger (1.13.0)
+
+Der Knopf war weiß mit dünnem Rand — auf dem ohnehin weißen Seitenkopf ging
+er darin unter. Jetzt im Grün der Seite (`#2f7d4f`), damit er als das
+erkennbar ist, was er ist: die einzige Navigation.
+
+Drei einzelne `<span>` statt eines SVG-Pfades, weil sich nur so beim Öffnen
+ein Kreuz daraus legen lässt. Der mittlere Strich ist auf 68 % gekürzt, das
+nimmt dem Symbol die Strenge. `prefers-reduced-motion` schaltet alle
+Übergänge ab.
+
+Der Hamburger schwebte bisher frei in der Ecke. Jetzt sitzt er in einer
+Leiste am oberen Rand, die beim Herunterscrollen schrumpft: oben 62 px für
+eine große Trefferfläche, ab 40 px Scrollweg 44 px mit weißem Hintergrund,
+damit sie wenig vom Inhalt verdeckt. Die Leiste selbst hat
+`pointer-events: none` — nur der Knopf fängt Klicks ab, sonst läge ein
+unsichtbarer Streifen über der Seite.
 
 ---
 
