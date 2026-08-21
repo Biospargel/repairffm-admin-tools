@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.9.7
+ * Version: 1.10.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -88,10 +88,19 @@ function rfat_analyse_booking($post_id) {
         'other' => [],
     ];
 
-    $date_key = null;
-    $time_key = null;
+    /*
+     * Seit 21.08.2026 ist der Quellcode des Buchungs-Plugins bekannt (siehe
+     * mu-plugins-referenz/). Die Feldnamen stehen damit fest und müssen
+     * nicht mehr an ihrer Wertform erraten werden.
+     *
+     * Das Raten bleibt als Rückfallweg bestehen: Sollte das Kern-Plugin
+     * einmal andere Namen verwenden, fällt hier nichts aus — es wird dann
+     * eben wieder geschaut, was wie ein Datum oder ein Code aussieht.
+     */
+    $date_key = metadata_exists('post', $post_id, '_rc_date') ? '_rc_date' : null;
+    $time_key = metadata_exists('post', $post_id, '_rc_time') ? '_rc_time' : null;
+    $code_key = metadata_exists('post', $post_id, '_rc_code') ? '_rc_code' : null;
     $combined_key = null;
-    $code_key = null;
     $other = [];
 
     foreach ($all_meta as $key => $values) {
@@ -104,6 +113,11 @@ function rfat_analyse_booking($post_id) {
             continue;
         }
         $value = (string) $value;
+
+        // Bereits als Datum, Zeit oder Code vergeben? Dann nicht doppelt zeigen.
+        if ($key === $date_key || $key === $time_key || $key === $code_key) {
+            continue;
+        }
 
         if ($combined_key === null && rfat_looks_like_datetime($value)) {
             $combined_key = $key;
@@ -159,6 +173,24 @@ function rfat_get_meta_or_empty($post_id) {
 }
 
 function rfat_humanize_key($key) {
+    /*
+     * Die Namen des Kern-Plugins sind bekannt — also richtige Bezeichnungen
+     * statt "Rc note". Vor allem die Problembeschreibung stand bisher als
+     * kryptisches Rohfeld da, dabei ist sie das Einzige, was die Werkstatt
+     * vor dem Termin wirklich wissen will.
+     */
+    $bekannt = [
+        '_rc_note' => 'Problembeschreibung',
+        '_rc_cat'  => 'Bereich',
+        '_rc_slot' => 'Slot-Kennung',
+        '_rc_date' => 'Datum',
+        '_rc_time' => 'Uhrzeit',
+        '_rc_code' => 'Buchungscode',
+    ];
+    if (isset($bekannt[$key])) {
+        return $bekannt[$key];
+    }
+
     $label = ltrim($key, '_');
     $label = str_replace(['rc_', 'rc-', '_', '-'], [' ', ' ', ' ', ' '], $label);
     $label = trim($label);
@@ -704,12 +736,32 @@ function rfat_find_booking_by_code($code) {
     if ($code === '') {
         return null;
     }
+    /*
+     * Direkt ueber _rc_code suchen statt jede Buchung zu laden und ihre
+     * Felder zu untersuchen. Bei einer Handvoll Terminen fällt das nicht
+     * auf, ab ein paar hundert schon — und die Datenbank kann das besser.
+     */
     $posts = get_posts([
+        'post_type'   => 'rc_booking',
+        'numberposts' => 1,
+        'post_status' => ['publish', 'draft', 'pending', 'future'],
+        'meta_key'    => '_rc_code',
+        'meta_value'  => $code,
+    ]);
+    if ($posts) {
+        return ['post' => $posts[0], 'analysis' => rfat_analyse_booking($posts[0]->ID)];
+    }
+
+    /*
+     * Rückfall für Buchungen ohne _rc_code — etwa aus einer Zeit vor dem
+     * Kern-Plugin, oder falls es den Namen einmal ändert.
+     */
+    $alle = get_posts([
         'post_type'   => 'rc_booking',
         'numberposts' => -1,
         'post_status' => ['publish', 'draft', 'pending', 'future'],
     ]);
-    foreach ($posts as $p) {
+    foreach ($alle as $p) {
         $analysis = rfat_analyse_booking($p->ID);
         $found_code = $analysis['code']['value'] ?? '';
         if ($found_code !== '' && rfat_normalize_code($found_code) === $code) {
@@ -2126,7 +2178,14 @@ add_action('wp_footer', function () {
                  + 'bleiben: Code notieren und jederzeit darüber zurückkommen.']
             ];
 
-            var nodes = ov.querySelectorAll('h1, h2, h3, h4, p');
+            /*
+             * Seit der Quellcode bekannt ist, lässt sich der Schritt genau
+             * benennen: Der Bestätigungsschritt ist [data-step="done"], der
+             * Hinweistext hat die Klasse .rc-hint. Zuvor wurde über alle
+             * Überschriften und Absätze gesucht und der Text verglichen.
+             */
+            var done = ov.querySelector('[data-step="done"]');
+            var nodes = (done || ov).querySelectorAll('h1, h2, h3, h4, p.rc-hint, p');
             Array.prototype.forEach.call(nodes, function (el) {
                 if (el.children.length || el.getAttribute('data-rfat-retext')) {
                     return;
@@ -2646,6 +2705,18 @@ function rfat_booking_summary($post_id) {
     }
 
     $lines[] = 'Code:    ' . ($analysis['code']['value'] ?? '-');
+
+    /*
+     * Die freiwillige Problembeschreibung. Bis 1.10.0 landete sie nur als
+     * namenloses Rohfeld in der Übersicht — dabei ist sie das Einzige, was
+     * vor dem Termin verrät, was überhaupt mitgebracht wird.
+     */
+    $note = trim((string) get_post_meta($post_id, '_rc_note', true));
+    if ($note !== '') {
+        $lines[] = '';
+        $lines[] = 'Problem:';
+        $lines[] = '  ' . str_replace("\n", "\n  ", $note);
+    }
 
     return implode("\n", $lines);
 }
