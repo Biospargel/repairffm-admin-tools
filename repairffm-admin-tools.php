@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.13.0
+ * Version: 1.14.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1398,15 +1398,6 @@ add_action('wp_head', function () {
             box-sizing: border-box;
         }
 
-        /* Navigations-Buttons (z.B. "Termin buchen" oben): nie randlos/überdimensioniert */
-        .wp-block-navigation-item a,
-        .wp-block-navigation-item__content {
-            padding: clamp(8px, 2.2vw, 14px) clamp(12px, 4vw, 26px) !important;
-            line-height: 1.3 !important;
-            min-height: 0 !important;
-            box-sizing: border-box !important;
-        }
-
         /* ============ Eigenständiges Handy-Menü (siehe wp_footer unten) ============
          *
          * Der Knopf sitzt in einer eigenen Leiste am oberen Rand. Beim
@@ -1618,128 +1609,15 @@ add_action('wp_head', function () {
          * Seite völlig ohne Navigation.
          */
         /*
-         * Das Ausblenden der Theme-Menüpunkte steht jetzt im Skript unten,
-         * nicht mehr hier. Zweimal hatte an dieser Stelle ein geratener
-         * Selektor gestanden (`header nav.wp-block-navigation`), zweimal
-         * ohne jede Wirkung — das Markup des Themes ist uns unbekannt und
-         * von hier aus nicht einsehbar. Über die Adressen der Menüpunkte
-         * ist es dagegen eindeutig; die kennen wir aus unserem eigenen Menü.
+         * Die Leiste ist die Navigation der Seite — auf jedem Fenster,
+         * nicht nur auf dem Handy. Das Menü des Themes wird beim Rendern
+         * entfernt, also gibt es sonst keins mehr.
          */
-
-        @media (max-width: 600px) {
-            /* Nur auf dem Handy taucht der Hamburger auf. Das Skript nimmt
-               das [hidden] weg, sobald klar ist, dass das Theme kein
-               eigenes Menü mitbringt. */
-            .rfat-topbar:not([hidden]) {
-                display: flex;
-            }
-
-            /* ---- Handy-Menü des Themes, falls doch eins da ist ---- */
-            .wp-block-navigation__responsive-container-open,
-            .wp-block-navigation__responsive-container-close {
-                padding: 10px !important;
-                border-radius: 10px;
-                color: #1c2a22;
-            }
-            .wp-block-navigation__responsive-container-open svg,
-            .wp-block-navigation__responsive-container-close svg {
-                width: 28px;
-                height: 28px;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open {
-                background: #f7f8f6 !important;
-                padding: 76px 22px 28px !important;
-                overflow-y: auto !important;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation__container {
-                flex-direction: column;
-                align-items: stretch;
-                gap: 8px;
-                width: 100%;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item {
-                width: 100%;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item a,
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item__content {
-                display: block !important;
-                width: 100% !important;
-                box-sizing: border-box !important;
-                font-size: 19px !important;
-                font-weight: 700 !important;
-                padding: 15px 18px !important;
-                border-radius: 14px !important;
-                color: #1c2a22 !important;
-                background: #fff;
-                border: 1px solid #e7ebe8;
-            }
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item a:active,
-            .wp-block-navigation__responsive-container.is-menu-open .wp-block-navigation-item a:hover {
-                background: #e8f1eb;
-                border-color: #2f7d4f;
-            }
-            /* Der aktuelle grüne "Termin buchen"-Pill bleibt auch im Overlay grün */
-            .wp-block-navigation__responsive-container.is-menu-open .wp-element-button,
-            .wp-block-navigation__responsive-container.is-menu-open .current-menu-item > a {
-                background: #2f7d4f !important;
-                color: #fff !important;
-                border-color: #2f7d4f !important;
-            }
+        .rfat-topbar:not([hidden]) {
+            display: flex;
         }
 
-        /* ============ Handy-Ansicht: Inhalt vom Rand lösen, alles schlanker ============ */
-        @media (max-width: 782px) {
-            /*
-             * WordPress-Block-Themes steuern den Seitenrand über diese zwei
-             * CSS-Variablen (theme.json "root padding"). Dieses Theme setzt
-             * sie auf schmalen Screens offenbar nicht — deshalb klebt alles
-             * am Rand. Hier global überschreiben: Hintergründe bleiben
-             * randlos, nur der INHALT rückt ein (der offizielle Mechanismus).
-             */
-            :root,
-            body {
-                --wp--style--root--padding-left: 20px !important;
-                --wp--style--root--padding-right: 20px !important;
-            }
-            /* Fallback für Container, die nicht am Global-Padding hängen */
-            .wp-block-post-content,
-            .entry-content,
-            .wp-block-post-title,
-            .wp-site-blocks .is-layout-constrained > :not(.alignfull):not(.has-global-padding),
-            .wp-site-blocks .is-layout-flow > :not(.alignfull):not(.has-global-padding) {
-                padding-left: 20px;
-                padding-right: 20px;
-                box-sizing: border-box;
-            }
-            /* Doppelten Innenabstand vermeiden, wo wir schon selbst polstern */
-            .rfat-pub-wrap {
-                padding-left: 0;
-                padding-right: 0;
-            }
-
-            /* Überschriften deutlich schlanker (Hero kann h1 oder h2 sein) */
-            h1 { font-size: clamp(28px, 8.5vw, 36px) !important; line-height: 1.12 !important; }
-            h2 { font-size: clamp(24px, 7vw, 30px) !important; line-height: 1.15 !important; }
-
-            /*
-             * ALLE Theme-Buttons kompakter: .wp-element-button ist die
-             * Standardklasse, die WordPress jedem Block-Button gibt —
-             * deckt den grünen Nav-Pill UND den Hero-Button ab.
-             */
-            .wp-element-button,
-            .wp-block-button__link {
-                padding: 10px 18px !important;
-                font-size: 16px !important;
-                border-radius: 10px !important;
-            }
-
-            /* Navigation kompakter */
-            .wp-block-navigation-item a,
-            .wp-block-navigation-item__content {
-                padding: 8px 14px !important;
-                font-size: 15px !important;
-                line-height: 1.3 !important;
-            }
+        @media (max-width: 600px) {
 
             /* Alle .btn-Buttons (Buchungswidget) schlanker */
             .btn {
@@ -2686,30 +2564,121 @@ register_deactivation_hook(__FILE__, function () {
  * tatsächlich ein core/navigation-Block ist — ist sie das nicht, übernimmt
  * das eigenständige Handy-Menü weiter unten.
  * ========================================================================= */
-add_filter('render_block_data', function ($block) {
-    if (($block['blockName'] ?? '') === 'core/navigation') {
-        // 'mobile' ist zwar WordPress-Default, aber Themes setzen hier
-        // gerne 'never' — dann rendert WordPress gar keinen Hamburger.
-        $block['attrs']['overlayMenu'] = 'mobile';
-        $block['attrs']['hasIcon']     = true;
-    }
-    return $block;
-});
+/* =========================================================================
+ * DAS MENÜ DES THEMES SCHON BEIM AUSLIEFERN MARKIEREN
+ *
+ * Bis 1.13.1 hat das ein Skript im Seitenfuß erledigt. Das funktionierte,
+ * war aber sichtbar: Die vier Knöpfe standen kurz da und verschwanden dann
+ * — das HTML war längst gezeichnet, bevor das Skript überhaupt lief.
+ *
+ * Hier passiert es beim Rendern, also bevor irgendetwas beim Besucher
+ * ankommt. Erkannt wird wie im Skript über Adresse UND Beschriftung der
+ * Menüpunkte, nicht über geratene Klassennamen.
+ *
+ * Der Block wird ersatzlos entfernt, nicht bloß ausgeblendet: Markup
+ * auszuliefern, das anschließend versteckt wird, ist doppelte Arbeit für
+ * jeden Besucher — er lädt es, der Browser baut es auf, und dann fällt es
+ * weg. Weil damit auch am Rechner keine Menüleiste mehr käme, ist unser
+ * Menü nicht länger auf schmale Fenster beschränkt: Es ist ab jetzt die
+ * Navigation, überall.
+ * ========================================================================= */
 
-add_filter('render_block_core/navigation', function ($content) {
-    if (strpos($content, 'termin-abrufen') !== false) {
-        return $content; // Schon vorhanden (z. B. manuell ergänzt).
+/**
+ * Pfadteil einer Adresse, ohne Schrägstrich am Ende — wie im Skript.
+ */
+function rfat_url_pfad($url) {
+    $pfad = wp_parse_url((string) $url, PHP_URL_PATH);
+    if (!is_string($pfad)) {
+        return null;
     }
-    $item = '<li class="wp-block-navigation-item wp-block-navigation-link">'
-          . '<a class="wp-block-navigation-item__content" href="' . esc_url(home_url('/termin-abrufen/')) . '">'
-          . '<span class="wp-block-navigation-item__label">Termin abrufen</span>'
-          . '</a></li>';
-    $pos = strrpos($content, '</ul>');
-    if ($pos !== false) {
-        $content = substr_replace($content, $item . '</ul>', $pos, 5);
+    $pfad = rtrim($pfad, '/');
+    return $pfad === '' ? '/' : $pfad;
+}
+
+function rfat_text_normalisieren($text) {
+    $text = wp_strip_all_tags(html_entity_decode((string) $text, ENT_QUOTES, 'UTF-8'));
+    return trim(preg_replace('/\s+/u', ' ', mb_strtolower($text)));
+}
+
+/**
+ * Pfad => Liste der Beschriftungen, unter denen dieser Punkt im Menü steht.
+ */
+function rfat_menu_ziele() {
+    static $ziele = null;
+    if ($ziele !== null) {
+        return $ziele;
     }
-    return $content;
-});
+    $ziele = [];
+    foreach (rfat_get_menu_items() as $item) {
+        $pfad = rfat_url_pfad($item['url']);
+        if ($pfad === null) {
+            continue;
+        }
+        $ziele[$pfad][] = rfat_text_normalisieren($item['label']);
+    }
+    return $ziele;
+}
+
+add_filter('render_block', function ($content, $block) {
+    if (is_admin() || is_feed() || !empty($GLOBALS['rfat_nav_markiert'])) {
+        return $content;
+    }
+    // Billiger Vorabtest, damit die Masse der Blöcke sofort durch ist.
+    if ($content === '' || strpos($content, '<a ') === false) {
+        return $content;
+    }
+
+    $ziele = rfat_menu_ziele();
+    if (count($ziele) < 2) {
+        return $content;
+    }
+
+    if (!preg_match_all('/<a\b[^>]*href=([\"\'])(.*?)\1[^>]*>(.*?)<\/a>/is', $content, $treffer, PREG_SET_ORDER)) {
+        return $content;
+    }
+
+    $passend = 0;
+    $linktext = 0;
+    foreach ($treffer as $t) {
+        // Bildlinks sind nie Menüpunkte — das ist das Logo.
+        if (preg_match('/<(img|svg|picture)\b/i', $t[3])) {
+            continue;
+        }
+        $pfad = rfat_url_pfad($t[2]);
+        $text = rfat_text_normalisieren($t[3]);
+        if ($pfad !== null && isset($ziele[$pfad]) && in_array($text, $ziele[$pfad], true)) {
+            $passend++;
+            $linktext += mb_strlen($text);
+        }
+    }
+
+    // Unter zwei Treffern ist die Sache nicht eindeutig genug.
+    if ($passend < 2) {
+        return $content;
+    }
+
+    /*
+     * Dieselbe Sicherung wie im Skript: Steht im Block merklich mehr als
+     * die Menüpunkte, steckt vermutlich der Seitentitel mit drin. Dann
+     * lieber nichts anfassen und dem Skript im Fuß den Vortritt lassen —
+     * das kann einzelne Links ausblenden, ein Block nicht.
+     */
+    $gesamt = mb_strlen(rfat_text_normalisieren($content));
+    if ($gesamt > $linktext * 2 + 40) {
+        return $content;
+    }
+
+    $GLOBALS['rfat_nav_markiert'] = true;
+    return '';
+}, 10, 2);
+
+/*
+ * Hier standen zwei Filter, die das Menü des Themes aufgehübscht haben:
+ * einer erzwang dessen Hamburger-Modus, der andere hängte "Termin abrufen"
+ * hinten an. Beides ist gegenstandslos, seit das Menü beim Rendern
+ * entfernt wird — es wäre Arbeit an etwas, das gleich darauf verschwindet.
+ * "Termin abrufen" steht ohnehin in unserem eigenen Menü.
+ */
 
 /* =========================================================================
  * MENÜPUNKTE ERMITTELN (für das eigenständige Handy-Menü unten)
@@ -2937,7 +2906,6 @@ add_action('wp_footer', function () {
     </div>
 
     <script id="rfat-mobile-nav">
-    window.rfatNavDiag = <?php echo (current_user_can('manage_options') && !empty($_GET['rfat_diag'])) ? 'true' : 'false'; ?>;
     (function () {
         var openBtn = document.getElementById('rfat-nav-open');
         var topbar = document.getElementById('rfat-topbar');
@@ -2949,18 +2917,27 @@ add_action('wp_footer', function () {
          * Bringt das Theme schon ein eigenes Handy-Menü mit? Dann unseres
          * restlos entfernen, damit nicht zwei Hamburger übereinanderliegen.
          */
+        /*
+         * Nur wenn das Theme wirklich einen sichtbaren eigenen Hamburger
+         * zeigt. Auf "vorhanden" allein zu prüfen genügt nicht mehr, seit
+         * unsere Leiste in jedem Fenster steht: Themes verstecken ihren
+         * Knopf am Rechner per CSS, und wir hätten unser Menü dann auch
+         * dort weggeräumt — die Seite stünde ohne jede Navigation da.
+         */
         var themeToggle = document.querySelector('.wp-block-navigation__responsive-container-open');
-        if (themeToggle) {
+        if (themeToggle && themeToggle.offsetParent !== null) {
             document.documentElement.classList.add('rfat-nav-core');
             topbar.parentNode.removeChild(topbar);
             overlay.parentNode.removeChild(overlay);
-            return;
+            return;   // .rfat-nav-core blendet das Theme-Menü wieder ein
         }
         document.documentElement.classList.add('rfat-nav-fallback');
         topbar.hidden = false;
 
+<?php /* Nur ausliefern, wenn beim Rendern nichts entfernt wurde. */
+       if (empty($GLOBALS['rfat_nav_markiert'])) : ?>
         /*
-         * ---- Die Menüpunkte des Themes ausblenden ----
+         * ---- Auffangnetz: Menüpunkte des Themes entfernen ----
          *
          * Zweimal stand hier ein geratener CSS-Selektor
          * (`header nav.wp-block-navigation`), zweimal ohne Wirkung: Das
@@ -2979,12 +2956,28 @@ add_action('wp_footer', function () {
             catch (e) { return null; }
         }
 
-        function themeMenuAusblenden() {
+        function beschriftung(el) {
+            return (el.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+        }
+
+        function themeMenuEntfernen() {
+            /*
+             * Adresse UND Beschriftung muessen passen.
+             *
+             * Die Adresse allein reicht nicht: Auf "/" zeigt in fast jedem
+             * Theme auch das Logo und der Seitentitel. Nach Adresse allein
+             * gesucht, verschwand im Test der komplette Seitenkopf - Logo
+             * und Titel mit. Die Beschriftung unterscheidet die beiden
+             * sauber: Der Menuepunkt heisst "Start", das Logo traegt den
+             * Seitennamen oder gar keinen Text.
+             */
             var gesucht = {};
             var eigene = overlay.querySelectorAll('.rfat-nav-link');
             for (var i = 0; i < eigene.length; i++) {
                 var p = pfad(eigene[i].getAttribute('href'));
-                if (p) { gesucht[p] = true; }
+                if (!p) { continue; }
+                if (!gesucht[p]) { gesucht[p] = []; }
+                gesucht[p].push(beschriftung(eigene[i]));
             }
 
             // Nur oberhalb des Inhalts suchen - Links im Text sollen bleiben.
@@ -2997,8 +2990,12 @@ add_action('wp_footer', function () {
                 if (a.closest('#wpadminbar')) { continue; }
                 if (inhalt && (inhalt.contains(a) ||
                     (inhalt.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING))) { continue; }
+                // Bildlinks sind nie Menuepunkte - das ist das Logo.
+                if (a.querySelector('img, svg, picture')) { continue; }
                 var pf = pfad(a.getAttribute('href'));
-                if (pf && gesucht[pf]) { treffer.push(a); }
+                if (pf && gesucht[pf] && gesucht[pf].indexOf(beschriftung(a)) !== -1) {
+                    treffer.push(a);
+                }
             }
 
             // Unter zwei Treffern ist die Sache nicht eindeutig genug.
@@ -3011,7 +3008,7 @@ add_action('wp_footer', function () {
             }
             if (!huelle || huelle === document.body ||
                 huelle === document.documentElement) {
-                return versteckeEinzeln(treffer, 'kein brauchbarer Container');
+                return entferneEinzeln(treffer, 'kein brauchbarer Container');
             }
 
             /*
@@ -3025,11 +3022,10 @@ add_action('wp_footer', function () {
             }
             var gesamt = (huelle.textContent || '').trim().length;
             if (gesamt > summe * 2 + 40) {
-                return versteckeEinzeln(treffer, 'Container enthielt mehr als das Menü');
+                return entferneEinzeln(treffer, 'Container enthielt mehr als das Menü');
             }
 
-            huelle.style.display = 'none';
-            huelle.setAttribute('data-rfat-versteckt', '1');
+            huelle.parentNode.removeChild(huelle);
             return {
                 anzahl: treffer.length,
                 art: 'Container',
@@ -3038,24 +3034,30 @@ add_action('wp_footer', function () {
             };
         }
 
-        function versteckeEinzeln(treffer, grund) {
+        function entferneEinzeln(treffer, grund) {
             for (var i = 0; i < treffer.length; i++) {
                 var el = treffer[i];
                 // Bis zum Listenpunkt hoch, falls es einer ist.
                 var li = el.closest('li');
-                (li || el).style.display = 'none';
+                var weg = li || el;
+                weg.parentNode.removeChild(weg);
             }
             return { anzahl: treffer.length, art: 'einzeln', grund: grund };
         }
 
-        var versteckt = themeMenuAusblenden();
+        /*
+         * Dieser ganze Abschnitt steht nur dann in der Seite, wenn der
+         * Server beim Rendern nichts gefunden hat — sonst waere er
+         * Ballast, den jeder Besucher mitlaedt, ohne dass er etwas tut.
+         */
+        var versteckt = themeMenuEntfernen();
 
         /*
          * Nur für uns, und nur auf ausdrücklichen Wunsch: Wenn oben doch
          * noch etwas stehen bleibt, sagt eine Zeile mit ?rfat_diag=1 in der
          * Adresse, was gefunden wurde. Das erspart die Raterei von vorher.
          */
-        if (window.rfatNavDiag) {
+        if (<?php echo (current_user_can('manage_options') && !empty($_GET['rfat_diag'])) ? 'true' : 'false'; ?>) {
             var d = document.createElement('div');
             d.style.cssText = 'position:fixed;left:8px;bottom:8px;z-index:99999;max-width:92vw;' +
                 'background:#1c2a22;color:#fff;font:12px/1.45 monospace;padding:9px 11px;' +
@@ -3064,6 +3066,7 @@ add_action('wp_footer', function () {
             document.body.appendChild(d);
         }
 
+<?php endif; ?>
         /*
          * Beim Herunterscrollen schrumpft die Leiste. Der Schwellwert liegt
          * bewusst nicht bei 0, sonst flackert sie bei jedem Wackeln.
