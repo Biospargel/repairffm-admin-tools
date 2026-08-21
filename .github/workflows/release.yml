@@ -1,0 +1,71 @@
+name: Release
+
+# Legt automatisch ein Release an, sobald die Versionsnummer im Plugin-Kopf
+# auf main steigt. Damit entfällt das manuelle Anlegen samt Zip-Upload —
+# und genau diese Handarbeit war bisher die Fehlerquelle (falscher Tag,
+# vergessenes Asset).
+on:
+  push:
+    branches: [main]
+    paths: ['repairffm-admin-tools.php']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PHP-Syntax prüfen
+        run: php -l repairffm-admin-tools.php
+
+      - name: Version aus dem Plugin-Kopf lesen
+        id: version
+        run: |
+          VERSION=$(grep -m1 -E '^[[:space:]]*\*[[:space:]]*Version:' repairffm-admin-tools.php \
+            | sed -E 's/.*Version:[[:space:]]*//' | tr -d '[:space:][:cntrl:]')
+          if [ -z "$VERSION" ]; then
+            echo "::error::Keine Version im Plugin-Kopf gefunden."
+            exit 1
+          fi
+          echo "Gefundene Version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Gibt es das Release schon?
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "Release ${{ steps.version.outputs.tag }} existiert bereits – nichts zu tun."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Der Ordnername im Archiv MUSS dem Installationsordner entsprechen,
+      # sonst installiert WordPress das Plugin unter neuem Namen und lässt
+      # das alte deaktiviert zurück.
+      - name: Zip bauen
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          mkdir -p build/repairffm-admin-tools
+          cp repairffm-admin-tools.php build/repairffm-admin-tools/
+          cd build
+          zip -qr "../repairffm-admin-tools-${{ steps.version.outputs.version }}.zip" repairffm-admin-tools
+          cd ..
+          unzip -l "repairffm-admin-tools-${{ steps.version.outputs.version }}.zip"
+
+      - name: Release anlegen und Zip anhängen
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "repairffm-admin-tools-${{ steps.version.outputs.version }}.zip" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --generate-notes
