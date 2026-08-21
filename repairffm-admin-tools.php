@@ -1981,6 +1981,7 @@ add_action('wp_footer', function () {
             }
 
             var code = match[0].toUpperCase();
+            rcRetext(ov);
             if (existing) {
                 if (existing.getAttribute('data-code') === code) { return; }
                 existing.parentNode.removeChild(existing);
@@ -2098,6 +2099,47 @@ add_action('wp_footer', function () {
             } else {
                 (ov.firstElementChild || ov).appendChild(box);
             }
+        }
+
+        /*
+         * Zwei Sätze des Kern-Plugins richtigstellen.
+         *
+         * "Termin gebucht!" stimmt nicht mehr, seit Termine erst nach Zusage
+         * gelten. Und "Wir speichern keine Kontaktdaten" steht unmittelbar
+         * über unserem E-Mail-Feld — ein falsches Datenschutzversprechen an
+         * der denkbar schlechtesten Stelle.
+         *
+         * Beides gehört dem mu-Plugin, an dessen Datei wir nicht kommen.
+         * Also wird der Text beim Anzeigen ersetzt.
+         *
+         * Angefasst werden nur Elemente OHNE Kindelemente. Sonst könnte ein
+         * Austausch per textContent verschachtelte Inhalte mitreißen — etwa
+         * den Buchungscode, der in einem eigenen Element steckt.
+         */
+        function rcRetext(ov) {
+            var ersetzungen = [
+                [/Termin gebucht/i, 'Termin vorgemerkt'],
+                [/speichern keine Kontaktdaten/i,
+                 'Bitte warte noch auf unsere Bestätigung — erst dann steht dein '
+                 + 'Termin fest. Damit du das nicht verpasst, kannst du unten '
+                 + 'freiwillig deine E-Mail hinterlassen. Möchtest du anonym '
+                 + 'bleiben: Code notieren und jederzeit darüber zurückkommen.']
+            ];
+
+            var nodes = ov.querySelectorAll('h1, h2, h3, h4, p');
+            Array.prototype.forEach.call(nodes, function (el) {
+                if (el.children.length || el.getAttribute('data-rfat-retext')) {
+                    return;
+                }
+                var text = el.textContent || '';
+                for (var i = 0; i < ersetzungen.length; i++) {
+                    if (ersetzungen[i][0].test(text)) {
+                        el.textContent = ersetzungen[i][1];
+                        el.setAttribute('data-rfat-retext', '1');
+                        return;
+                    }
+                }
+            });
         }
 
         /*
