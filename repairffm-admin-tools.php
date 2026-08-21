@@ -1463,6 +1463,27 @@ add_action('wp_head', function () {
             overflow: hidden;
         }
 
+        /*
+         * Auf dem Handy soll NUR der Hamburger stehen.
+         *
+         * Das Theme legt seine Menüpunkte darüber hinaus als Liste in den
+         * Kopf — untereinander, weil sie nebeneinander nicht passen. Das
+         * frisst den halben ersten Bildschirm und doppelt unser Menü.
+         *
+         * Ausgeblendet wird nur, wenn unser Menü tatsächlich läuft: Die
+         * Klasse rfat-nav-fallback setzt das Skript erst, nachdem es
+         * festgestellt hat, dass das Theme kein eigenes Overlay mitbringt.
+         * Ohne diese Bedingung stünde jemand ohne JavaScript vor einer
+         * Seite völlig ohne Navigation.
+         */
+        @media (max-width: 600px) {
+            .rfat-nav-fallback .wp-block-navigation,
+            .rfat-nav-fallback header .wp-block-navigation__container,
+            .rfat-nav-fallback .wp-site-blocks header nav {
+                display: none !important;
+            }
+        }
+
         @media (max-width: 600px) {
             /* Nur auf dem Handy taucht der Hamburger auf. Das Skript nimmt
                das [hidden] weg, sobald klar ist, dass das Theme kein
