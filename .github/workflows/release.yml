@@ -41,11 +41,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
-            echo "Release ${{ steps.version.outputs.tag }} existiert bereits – nichts zu tun."
+            echo "Release ${{ steps.version.outputs.tag }} existiert bereits."
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # Der Pfadfilter oben laesst diesen Lauf nur zu, wenn sich die
+      # Plugin-Datei geaendert hat. Existiert das Release zu ihrer Version
+      # trotzdem schon, wurde die Nummer im Plugin-Kopf vergessen - und der
+      # Code ginge ohne Release und ohne Fehlermeldung auf main verloren.
+      # Genau das ist am 21.08.2026 mit 1.9.0 passiert.
+      - name: Version vergessen?
+        if: github.event_name == 'push' && steps.check.outputs.exists == 'true'
+        run: |
+          echo "::error::Die Plugin-Datei wurde geaendert, aber ${{ steps.version.outputs.tag }} existiert bereits. Die Versionsnummer im Plugin-Kopf wurde vermutlich nicht hochgezaehlt - es entsteht kein Release."
+          exit 1
 
       # Der Ordnername im Archiv MUSS dem Installationsordner entsprechen,
       # sonst installiert WordPress das Plugin unter neuem Namen und lässt
