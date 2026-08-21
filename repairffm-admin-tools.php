@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.9.5
+ * Version: 1.9.6
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1463,6 +1463,27 @@ add_action('wp_head', function () {
             overflow: hidden;
         }
 
+        /*
+         * Auf dem Handy soll NUR der Hamburger stehen.
+         *
+         * Das Theme legt seine Menüpunkte darüber hinaus als Liste in den
+         * Kopf — untereinander, weil sie nebeneinander nicht passen. Das
+         * frisst den halben ersten Bildschirm und doppelt unser Menü.
+         *
+         * Ausgeblendet wird nur, wenn unser Menü tatsächlich läuft: Die
+         * Klasse rfat-nav-fallback setzt das Skript erst, nachdem es
+         * festgestellt hat, dass das Theme kein eigenes Overlay mitbringt.
+         * Ohne diese Bedingung stünde jemand ohne JavaScript vor einer
+         * Seite völlig ohne Navigation.
+         */
+        @media (max-width: 600px) {
+            .rfat-nav-fallback .wp-block-navigation,
+            .rfat-nav-fallback header .wp-block-navigation__container,
+            .rfat-nav-fallback .wp-site-blocks header nav {
+                display: none !important;
+            }
+        }
+
         @media (max-width: 600px) {
             /* Nur auf dem Handy taucht der Hamburger auf. Das Skript nimmt
                das [hidden] weg, sobald klar ist, dass das Theme kein
@@ -1903,6 +1924,19 @@ add_action('wp_footer', function () {
             window.requestAnimationFrame(function () {
                 rcPending = false;
                 rcSync();
+                /*
+                 * Getrennt von rcSync aufrufen, und zwar bei JEDER Mutation.
+                 *
+                 * rcSync bricht ab, wenn sich der Offen-Zustand nicht
+                 * geändert hat — richtig für den Menüknopf, falsch hier:
+                 * Das Overlay bleibt vom ersten Schritt bis zur Bestätigung
+                 * durchgehend offen. Der Buchungscode taucht erst am Ende
+                 * auf, also lange nach dem einzigen Zustandswechsel.
+                 *
+                 * Der Aufruf ist billig: Steht schon ein Block mit demselben
+                 * Code, kehrt die Funktion sofort zurück.
+                 */
+                rcAfterBooking();
             });
         }
 
