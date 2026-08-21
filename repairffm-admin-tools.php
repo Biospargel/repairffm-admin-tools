@@ -1477,9 +1477,14 @@ add_action('wp_head', function () {
          * Seite völlig ohne Navigation.
          */
         @media (max-width: 600px) {
-            .rfat-nav-fallback .wp-block-navigation,
-            .rfat-nav-fallback header .wp-block-navigation__container,
-            .rfat-nav-fallback .wp-site-blocks header nav {
+            /*
+             * Ausdruecklich nur der Navigationsblock. "header nav" wäre
+             * verlockend kurz, würde aber jedes nav im Kopf treffen — und
+             * manche Themes stecken Logo oder Titel mit hinein. Was hier
+             * verschwindet, soll ausschließlich die Menüliste sein.
+             */
+            .rfat-nav-fallback header nav.wp-block-navigation,
+            .rfat-nav-fallback header .wp-block-navigation {
                 display: none !important;
             }
         }
