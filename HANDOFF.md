@@ -313,7 +313,7 @@ Versionssprung zum ersten Mal.
 | 1.11.0 | **Buchung ist eine echte Seite** — Popup, Overlay-CSS und MutationObserver entfernt |
 | 1.12.0 | **Buchung ins Plugin geholt** — aktualisiert sich über GitHub; Schrittanzeige; Einleitung ab Schritt 2 aus |
 | 1.13.0 | Kopfleiste mit großem Hamburger, schrumpft beim Scrollen; Theme-Menü über die **Adressen** ausgeblendet statt über geratene Klassen |
-| 1.14.0 | Logo und Seitentitel verschont (1.13.0 nahm sie mit); Theme-Menü wird **serverseitig** markiert, deshalb blitzt es nicht mehr auf |
+| 1.14.0 | Logo und Seitentitel verschont (1.13.0 nahm sie mit); Theme-Menü wird **serverseitig entfernt** statt versteckt — kein Aufblitzen, 149 Zeilen weniger |
 
 ---
 
@@ -634,31 +634,51 @@ Die Erkennung läuft deshalb jetzt zusätzlich beim Rendern, über den
 `render_block`-Filter, nach denselben Regeln wie im Skript (Adresse **und**
 Beschriftung, Bildlinks übersprungen, dieselbe Textlängen-Sicherung).
 
-**Der Block wird nur eingepackt, nicht entfernt:**
+**Der Block wird ersatzlos entfernt**, nicht bloß ausgeblendet:
 
 ```php
-return '<div class="rfat-theme-nav" data-rfat-treffer="4">' . $content . '</div>';
+return '';
 ```
 
-Am Server wissen wir nicht, wie breit das Gerät ist. Ob das Menü
-verschwindet, entscheidet deshalb weiter CSS — aber eine Regel im `<head>`,
-die vor dem ersten Zeichnen greift. Auf dem Desktop bleibt die Navigation
-dadurch stehen.
+Ein Zwischenstand hatte ihn nur eingepackt und per CSS versteckt. Das
+beseitigte zwar das Aufblitzen, lieferte aber weiter Markup aus, das der
+Browser aufbaut und dann wegwirft — Arbeit für jeden Besucher, für nichts.
+
+Daraus folgt zwingend: **Unser Menü ist nicht länger auf schmale Fenster
+beschränkt.** Am Server ist die Fensterbreite unbekannt; wer den Block
+entfernt, nimmt ihn überall weg. Die Leiste steht deshalb in jedem Fenster
+und ist ab jetzt *die* Navigation der Seite.
 
 Das Skript im Fuß bleibt als Auffangnetz für Köpfe, die nicht über die
-Block-Ausgabe laufen. Findet es `.rfat-theme-nav` vor, tut es nichts.
+Block-Ausgabe laufen — **und wird nur dann überhaupt ausgeliefert:**
 
-Bringt das Theme wider Erwarten ein eigenes Handy-Menü mit, entfernt das
-Skript unsere Leiste und setzt `rfat-nav-core` — und
-`.rfat-nav-core .rfat-theme-nav { display: block }` holt das Theme-Menü
-zurück. Sonst stünde man ohne jede Navigation da.
+```php
+<?php if (empty($GLOBALS['rfat_nav_markiert'])) : ?>
+    … Erkennung …
+<?php endif; ?>
+```
+
+Im Normalfall spart das rund 6 KB JavaScript pro Seitenaufruf (gemessen:
+12 615 → 6 534 Zeichen Fuß-Ausgabe).
+
+**Mit entfernt wurden**, weil sie ein Menü aufhübschten, das es nicht mehr
+gibt: der `overlayMenu`-Filter, der Filter der „Termin abrufen" an die
+Theme-Navigation hängte (steht ohnehin in unserem Menü), das CSS für die
+Menü-Buttons des Themes und das für dessen Handy-Overlay — zusammen 144
+Zeilen.
+
+> Die Prüfung auf einen eigenen Hamburger des Themes verlangt jetzt, dass
+> er **sichtbar** ist (`offsetParent !== null`). Auf „vorhanden" allein zu
+> prüfen genügte nicht mehr: Themes verstecken ihren Knopf am Rechner per
+> CSS, und wir hätten unser Menü dort mit weggeräumt — die Seite stünde
+> ohne jede Navigation da.
 
 **Geprüft** (PHP-Seite, sechs Blockformen):
 
 | Block | Ergebnis |
 |---|---|
-| `<ul>` mit den vier Punkten | eingepackt |
-| Buttons-Block | eingepackt |
+| `<ul>` mit den vier Punkten | entfernt |
+| Buttons-Block | entfernt |
 | Container mit Titel **und** Links | unberührt → Skript übernimmt |
 | `<header>` außen, `<nav>` innen | nur das `<nav>`, Header unberührt |
 | Fließtext mit einem Menülink | unberührt |
