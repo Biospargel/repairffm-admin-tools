@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.8.0
+Stand: 21.08.2026 · Plugin-Version 1.9.6
 
 ---
 
@@ -23,16 +23,20 @@ Stand: 21.08.2026 · Plugin-Version 1.8.0
 
 ### Leitprinzip: Datensparsamkeit
 
-Die Seite wirbt ausdrücklich mit **„ganz anonym, ohne Name, ohne E-Mail"**,
-„Kein Tracking · Keine Cookies · Keine Daten". Das ist kein Beiwerk, sondern
-die zentrale Produktentscheidung und **darf nicht gebrochen werden**.
+Datensparsamkeit ist die zentrale Produktentscheidung. Ohne Zutun des
+Besuchers gibt es **keine Kontaktdaten**: kein Name, kein Konto, der
+**Buchungscode ist das einzige „Credential"**.
 
-Konsequenz: Es gibt keinerlei Kontaktdaten zu Buchungen. Niemand kann
-proaktiv benachrichtigt werden (keine Erinnerungs-Mails, keine Absage-Mails).
-Der **Buchungscode ist das einzige „Credential"**, das Besucher je erhalten.
-
-Diese Frage wurde explizit mit dem Betreiber geklärt: Kontaktfelder wurden
-**bewusst abgelehnt**, die Selbstverwaltung läuft rein über den Code.
+> ⚠️ **Geändert am 21.08.2026.** Auf Wunsch des Betreibers gibt es seit 1.8.4
+> ein **freiwilliges** E-Mail-Feld. Es ist nie erforderlich; ohne Eintrag
+> bleibt alles wie zuvor. Ein zweiter, getrennter Haken entscheidet, ob die
+> Adresse über den Termin hinaus bleiben darf — sonst wird sie danach
+> automatisch gelöscht.
+>
+> **Folge:** Der alte Werbetext „ganz anonym, ohne Name, ohne E-Mail" und
+> „Keine Daten" ist damit unzutreffend. Startseite und Datenschutzerklärung
+> müssen angepasst sein, **bevor** die Seite öffentlich geht (siehe 7).
+> Im Plugin selbst wurden alle solchen Zusagen in 1.8.5 bereinigt.
 
 ---
 
@@ -67,6 +71,27 @@ Zwei **Must-Use-Plugins** (`/wp-content/mu-plugins/`):
   läuft über `admin-ajax`. CSS-Klassen: `.rc-overlay`, `.rc-modal`, `.rc-cat`,
   `.rc-slot`, `.btn`, `.btn.ghost`. Button-IDs: `#rc-open`, `#rc-confirm`, `#rc-again`.
 - **Notizfeld:** „Kurz: Was ist kaputt?" (freiwillig, keine personenbezogenen Angaben)
+
+### Bestätigte Klassennamen des Buchungsdialogs
+
+Am 21.08.2026 über eine eingebaute Diagnose ausgelesen — **nicht mehr
+geraten**, sondern aus dem laufenden Dialog gemeldet:
+
+```
+.rc-overlay              Hintergrundfläche
+.rc-modal                der Dialog selbst
+.rc-close   #rc-close    Schließen-Button  ← fehlte in der Rekonstruktion
+.rc-cat                  Kategorie-Knöpfe
+.rc-back                 "zurück"
+.btn        #rc-confirm  "Verbindlich buchen"
+.btn.ghost  #rc-again    "Weiteren Termin buchen"
+```
+
+Dass `.rc-close` unbekannt war, ist der Grund, warum sich der schwer
+erreichbare Schließen-Button monatelang nicht beheben ließ.
+
+Die Diagnose bleibt erhalten: **`?rfat_diag=1`** an die Adresse hängen,
+nur für Angemeldete sichtbar.
 
 ### Seiten
 
@@ -265,6 +290,20 @@ Versionssprung zum ersten Mal.
 | 1.6.0 | „Termin abrufen" im Menü + Hamburger-Overlay auf dem Handy |
 | 1.7.0 | GitHub-Auto-Update eingebaut |
 | 1.8.0 | Eigenständiges Handy-Menü (unabhängig vom Theme-Block); Updater gehärtet |
+| 1.8.1–1.8.2 | Buchungs-Popup: Höhe gedeckelt, Menüknopf bei offenem Dialog aus; sichtbare Diagnose |
+| 1.8.3 | `/termin-abrufen/?code=…` als Link, mit Kopier-Knopf |
+| 1.8.4 | **Freiwillige E-Mail** mit getrennter Einwilligung und Selbstlöschung |
+| 1.8.5 | Unzutreffende Datenschutz-Zusagen im Plugin bereinigt |
+| 1.8.6 | Mail bei neuer Buchung; Kalendereintrag (.ics); Abmeldelink |
+| 1.8.7 | Empfänger der Benachrichtigung einstellbar |
+| 1.8.8 | Block im Bestätigungsschritt (Erkennung am Buchungscode) |
+| 1.8.9 | Statusvermerk im Seitenfuß |
+| 1.9.0 | **Termine gelten als Anfrage**, bis die Werkstatt zusagt |
+| 1.9.1–1.9.2 | Mailversand und Updater diagnostizierbar gemacht |
+| 1.9.3 | E-Mail direkt im Bestätigungsschritt, danach Weiterleitung |
+| 1.9.4 | Schließen-Button des Popups erreichbar (`.rc-close` bestätigt) |
+| 1.9.5 | Mail-Fehlermeldungen in Klartext |
+| 1.9.6 | Toter Funktionsaufruf behoben; nur noch Hamburger auf dem Handy; Dialogtext richtiggestellt |
 
 ---
 
@@ -279,6 +318,11 @@ Versionssprung zum ersten Mal.
 - ✅ GitHub-Updater
 - ✅ Erstes Release (`v1.8.0`) angelegt und verifiziert
 - ✅ Releases entstehen automatisch per GitHub Actions
+- ✅ Schließen-Button des Popups erreichbar (Ursache: `.rc-close` war unbekannt)
+- ✅ Freiwillige E-Mail samt Einwilligung, Löschung und Abmeldelink
+- ✅ Benachrichtigung bei neuer Anfrage, mit Zusagen-/Absagen-Links
+- ✅ Zusage-Schritt: Termine sind erst nach Bestätigung verbindlich
+- ✅ Kalendereintrag und Selbstverwaltungs-Link nach der Buchung
 
 ---
 
@@ -303,6 +347,35 @@ PHP-Standardzeitzone.
   sonst wirkt eine Änderung fälschlich als „hat nicht funktioniert".
 - **Immer die Plugin-Version prüfen**, bevor man einem Screenshot glaubt —
   einmal wurde eine Version getestet, die gar nicht aktiv war.
+
+### Stiller Leerlauf (zweimal erlebt, 21.08.2026)
+
+Zweimal landete Code auf `main`, der **nichts tat** — und beide Male fiel es
+niemandem auf, weil beides syntaktisch einwandfrei war:
+
+1. Ein vergessener Versions-Bump: Der Code von 1.9.0 lag auf `main`, die
+   Nummer stand auf 1.8.9. Der Workflow sah das Release schon vorhanden und
+   übersprang alles lautlos.
+2. `rcAfterBooking()` war seit 1.8.8 definiert, wurde aber **nie aufgerufen**.
+   Der Block nach der Buchung erschien deshalb monatelang nicht.
+
+Gemeinsame Ursache: Ein Bearbeitungsskript brach nach dem gelungenen Teil
+ab und schrieb die Datei nicht — die erfolgreiche Änderung ging mit verloren.
+
+**Beides prüft jetzt der Workflow** und bricht mit Fehlermeldung ab:
+Plugin-Datei geändert, aber Release existiert schon → Nummer vergessen.
+Funktion im eingebetteten JavaScript definiert, aber nirgends aufgerufen →
+toter Code.
+
+### Mailversand: `mail()` ist abgeschaltet
+
+Die Diagnose meldete „Die E-Mail-Funktion konnte nicht instanziiert werden"
+(PHPMailers *Could not instantiate mail function*). Das heißt: PHPs `mail()`
+ist beim Hoster deaktiviert, der Versand wird gar nicht erst versucht.
+
+**Vom Plugin aus nicht lösbar.** Nötig ist SMTP. Nicht am Spam-Filter, nicht
+an Outlook, nicht am Code suchen — die Meldung ist eindeutig, und seit 1.9.5
+steht die Erklärung in der Übersicht direkt darunter.
 
 ### Release-Fallstricke (erlebt am 20.08.2026)
 
@@ -354,10 +427,37 @@ Beides ungeprüft, weil biospargel.org aus der Sandbox nicht erreichbar ist.
 
 ### Kleinere Punkte
 
+### SMTP einrichten — dringendster Punkt ⚠️
+
+Ohne funktionierenden Versand erfährt die Werkstatt von einer Anfrage nur,
+wenn jemand zufällig in die Übersicht schaut. Das muss vor dem Livegang
+stehen.
+
+Empfohlen wurde am 21.08.2026 unter dem Kriterium „möglichst anonym":
+
+1. **Das Postfach des eigenen Hosters** — es kommt keine neue Partei hinzu,
+   kein zusätzlicher Auftragsverarbeiter, keine Änderung am Datenschutztext.
+2. **mailbox.org**, falls der Hoster keines anbietet.
+
+Ausdrücklich **nicht** Brevo, Mailjet, SMTP2GO: Marketing-Plattformen mit
+Öffnungs- und Klickmessung — ein Bruch mit dem eigenen Versprechen der Seite.
+
+Plugin: **FluentSMTP** (frei, ohne Werbung und Telemetrie).
+
+Absender muss eine Adresse der **eigenen Domain** sein, sonst scheitern SPF
+und DMARC. Empfänger ist `repair.ffm@outlook.com`.
+
+Kommt ein externer Dienst hinzu, gehört er als Auftragsverarbeiter in die
+Datenschutzerklärung.
+
+### Kleinere Punkte
+
 - Customizer → Zusätzliches CSS enthält noch die alten `.btn`-Regeln.
   Seit 1.3.0 redundant, kann gelöscht werden.
 - Kennwortschutz ist noch aktiv — vor dem Livegang deaktivieren.
-- Test des Sofort-CSS für das Buchungs-Popup steht aus (siehe unten).
+- Suchmaschinen-Sichtbarkeit prüfen (Einstellungen → Lesen).
+- Startseite, Datenschutz und Impressum müssen vor dem Livegang stehen;
+  fertige Texte lagen dem Betreiber am 21.08.2026 vor.
 
 ### Buchungs-Popup → eigene Seite (Wunsch vom 21.08.2026)
 
@@ -429,8 +529,20 @@ CPT:            rc_booking
 Meta:           _rc_slot, _rc_cat, _rfat_status (unseres)
 Shortcodes:     [repairffm_booking] (Kern), [rfat_manage_booking] (unseres)
 Admin-Seite:    edit.php?post_type=rc_booking&page=rfat-overview
-Transients:     rfat_github_release (6 h), rfat_menu_items (12 h)
+Transients:     rfat_github_release (6 h), rfat_menu_items (12 h),
+                rfat_status (5 min), rfat_cleanup_ran (24 h)
+Meta (unseres): _rfat_status, _rfat_email, _rfat_email_keep, _rfat_notified
+Optionen:       rfat_notify_to, rfat_notify_log, rfat_release_log
+Status:         angefragt, bestaetigt, offen, erledigt, storniert
 Handy-Menü:     .rfat-nav-open, .rfat-nav-overlay, .rfat-nav-link
+Nach Buchung:   #rfat-after-booking (in den fremden Dialog eingehängt)
 Diagnose:       <html class="rfat-nav-core"> oder "rfat-nav-fallback"
+                ?rfat_diag=1 blendet die Struktur des Dialogs ein
 Workflow:       .github/workflows/release.yml (Auslöser: Version im Plugin-Kopf)
+
+Öffentliche Adressen
+  /termin-abrufen/?code=RC-XXXXX     Termin ansehen und verwalten
+  /termin-abrufen/?ics=RC-XXXXX      Kalendereintrag herunterladen
+  /termin-abrufen/?abmelden=RC-XXXXX E-Mail entfernen (fragt nach)
+  /?rfat_do=bestaetigen&…            signierter Zusage-Link aus der Mail
 ```
