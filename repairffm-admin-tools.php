@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
- * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ganz ohne Name/E-Mail. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.8.4
+ * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
+ * Version: 1.8.5
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -29,7 +29,7 @@ define('RFAT_NONCE_ACTION', 'rfat_save_booking');
 /*
  * Freiwillige E-Mail-Benachrichtigung.
  *
- * Die Seite wirbt mit "ganz anonym, ohne Name, ohne E-Mail". Das bleibt der
+ * Die Seite wirbt mit Datensparsamkeit. Das bleibt der
  * Normalfall: Ohne Eintrag ändert sich nichts, der Code bleibt das einzige
  * Credential. Wer benachrichtigt werden möchte, trägt seine Adresse selbst
  * ein — und entscheidet mit einem zweiten, getrennten Haken, ob sie über den
@@ -897,9 +897,9 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                             data-target="rfat-share-<?php echo esc_attr($post->ID); ?>">Kopieren</button>
                 </div>
                 <p class="rfat-pub-share-hint">
-                    Bewahre ihn gut auf: Weil wir weder Namen noch E-Mail speichern,
-                    ist er zusammen mit deinem Code <?php echo esc_html($norm_code); ?>
-                    der einzige Weg zurück zu deinem Termin.
+                    Bewahre ihn gut auf: Wir speichern zu deinem Termin weder Namen
+                    noch Konto, deshalb ist er zusammen mit deinem Code
+                    <?php echo esc_html($norm_code); ?> dein Weg zurück.
                 </p>
             </div>
 
