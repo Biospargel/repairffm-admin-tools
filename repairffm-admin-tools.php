@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.9.1
+ * Version: 1.9.2
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -305,6 +305,21 @@ add_action('admin_init', function () {
         exit;
     }
 
+    if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'check_update') {
+        if (!current_user_can('manage_options')
+            || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_check_update')) {
+            wp_die('Sicherheitsprüfung fehlgeschlagen.');
+        }
+        // Cache leeren, damit wirklich bei GitHub nachgefragt wird.
+        delete_site_transient(RFAT_GH_CACHE_KEY);
+        rfat_fetch_latest_release(true);
+        // WordPress soll seine Update-Liste ebenfalls neu aufbauen.
+        delete_site_transient('update_plugins');
+        wp_update_plugins();
+        wp_safe_redirect(add_query_arg('rfat_checked', '1', wp_get_referer() ?: admin_url()));
+        exit;
+    }
+
     if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'test_notify') {
         if (!current_user_can('manage_options')
             || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_test_notify')) {
@@ -413,6 +428,9 @@ function rfat_render_overview_page() {
         <?php if (isset($_GET['rfat_trashed'])): ?>
             <div class="notice notice-success is-dismissible"><p>Buchung in den Papierkorb verschoben.</p></div>
         <?php endif; ?>
+        <?php if (isset($_GET['rfat_checked'])): ?>
+            <div class="notice notice-info is-dismissible"><p>Bei GitHub nachgefragt — Ergebnis siehe unten.</p></div>
+        <?php endif; ?>
         <?php if (isset($_GET['rfat_tested'])): ?>
             <div class="notice notice-info is-dismissible"><p>Testmail ausgelöst — Ergebnis siehe unten.</p></div>
         <?php endif; ?>
@@ -470,6 +488,30 @@ function rfat_render_overview_page() {
                             <?php if (!empty($log['error'])): ?>
                                 <br /><code><?php echo esc_html($log['error']); ?></code>
                             <?php endif; ?>
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </span>
+            </form>
+
+            <?php
+            $rlog    = get_option('rfat_release_log');
+            $current = rfat_plugin_version();
+            ?>
+            <form method="post" style="margin:10px 0 0;">
+                <?php wp_nonce_field('rfat_check_update'); ?>
+                <input type="hidden" name="rfat_action" value="check_update" />
+                <button type="submit" class="button">Bei GitHub nach Updates sehen</button>
+                <span class="description" style="margin-left:8px;">
+                    Installiert: <strong>v<?php echo esc_html($current); ?></strong>.
+                    <?php if (!is_array($rlog) || empty($rlog['time'])): ?>
+                        Es wurde noch nie bei GitHub nachgefragt.
+                    <?php else: ?>
+                        Letzte Abfrage <strong><?php echo esc_html(wp_date('d.m.Y H:i', $rlog['time'])); ?></strong>:
+                        <?php if (!empty($rlog['ok'])): ?>
+                            <span style="color:#2f7d4f;font-weight:600;"><?php echo esc_html($rlog['message']); ?></span>
+                            Erscheint trotzdem kein Update, ist die installierte Version bereits die neueste.
+                        <?php else: ?>
+                            <span style="color:#b3402f;font-weight:600;"><?php echo esc_html($rlog['message']); ?></span>
                         <?php endif; ?>
                     <?php endif; ?>
                 </span>
@@ -2921,15 +2963,31 @@ function rfat_fetch_latest_release($force = false) {
         ]
     );
 
-    if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
-        set_site_transient(RFAT_GH_CACHE_KEY, 'none', HOUR_IN_SECONDS);
-        return null;
+    if (is_wp_error($response)) {
+        return rfat_release_failed($force, 'Netzwerkfehler: ' . $response->get_error_message());
+    }
+
+    $code = (int) wp_remote_retrieve_response_code($response);
+    if ($code !== 200) {
+        /*
+         * GitHub erlaubt ohne Anmeldung 60 Anfragen pro Stunde und ZAEHLT
+         * PRO IP. Auf gemeinsam genutztem Hosting teilen sich viele Seiten
+         * dieselbe Adresse, das Kontingent ist dann schnell leer - ohne
+         * dass an dieser Seite irgendetwas falsch waere.
+         */
+        $remaining = wp_remote_retrieve_header($response, 'x-ratelimit-remaining');
+        if ($code === 403 && $remaining !== '' && (int) $remaining === 0) {
+            $reset = (int) wp_remote_retrieve_header($response, 'x-ratelimit-reset');
+            return rfat_release_failed($force, 'GitHub-Anfragelimit erreicht'
+                . ($reset ? ' (frei ab ' . wp_date('H:i', $reset) . ' Uhr)' : '')
+                . '. Das Limit gilt pro Server-IP, nicht pro Seite.');
+        }
+        return rfat_release_failed($force, 'GitHub antwortete mit HTTP ' . $code . '.');
     }
 
     $body = json_decode(wp_remote_retrieve_body($response), true);
     if (!is_array($body) || empty($body['tag_name'])) {
-        set_site_transient(RFAT_GH_CACHE_KEY, 'none', HOUR_IN_SECONDS);
-        return null;
+        return rfat_release_failed($force, 'Antwort von GitHub ohne verwertbares Release.');
     }
 
     /*
@@ -2961,8 +3019,8 @@ function rfat_fetch_latest_release($force = false) {
         $package = $fallback;
     }
     if ($package === '') {
-        set_site_transient(RFAT_GH_CACHE_KEY, 'none', HOUR_IN_SECONDS);
-        return null;
+        return rfat_release_failed($force, 'Release ' . $body['tag_name']
+            . ' hat keine hochgeladene .zip als Anhang.');
     }
 
     $release = [
@@ -2973,8 +3031,36 @@ function rfat_fetch_latest_release($force = false) {
     ];
 
     set_site_transient(RFAT_GH_CACHE_KEY, $release, 6 * HOUR_IN_SECONDS);
+    rfat_log_release(true, 'Release ' . $body['tag_name'] . ' gefunden.');
 
     return $release;
+}
+
+/**
+ * Fehlgeschlagenen Abruf festhalten und kurz sperren.
+ *
+ * Die Sperre war eine volle Stunde lang - eine einzelne Stoerung legte den
+ * Updater damit fuer eine Stunde lahm. Fuenfzehn Minuten schonen das
+ * Anfragelimit genauso, machen aber aus einem Aussetzer keine Sperre.
+ * Bei einer ausdruecklichen Pruefung wird gar nicht gesperrt.
+ */
+function rfat_release_failed($force, $message) {
+    if (!$force) {
+        set_site_transient(RFAT_GH_CACHE_KEY, 'none', 15 * MINUTE_IN_SECONDS);
+    }
+    rfat_log_release(false, $message);
+    return null;
+}
+
+/**
+ * Letzten Abruf festhalten, damit "es kommt kein Update" eine Ursache hat.
+ */
+function rfat_log_release($ok, $message) {
+    update_option('rfat_release_log', [
+        'time'    => time(),
+        'ok'      => (bool) $ok,
+        'message' => (string) $message,
+    ], false);
 }
 
 /**
