@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ganz ohne Name/E-Mail. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.8.0
+ * Version: 1.8.1
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1074,6 +1074,33 @@ add_action('wp_head', function () {
             }
         }
 
+        /* ============ Buchungs-Popup des Kern-Plugins entschärfen ============
+         * Das Modal kommt aus dem mu-Plugin, das wir nicht anfassen. Auf dem
+         * Handy lief es aus dem Bild, wodurch der Schließen-Button unerreichbar
+         * wurde. Statt den X-Button zu suchen (dessen Klasse wir nicht kennen),
+         * deckeln wir die Höhe und machen den Inhalt scrollbar — damit rückt
+         * er von selbst in Reichweite.
+         *
+         * Die Klassennamen stammen aus dem gerenderten HTML und sind NICHT
+         * durch Quellcode bestätigt. Greifen sie nicht, bleiben diese Regeln
+         * wirkungslos; die Diagnose unten sagt, welcher Fall vorliegt. */
+        .rc-overlay {
+            align-items: flex-start;
+            overflow-y: auto;
+            padding: max(16px, env(safe-area-inset-top)) 12px
+                     max(16px, env(safe-area-inset-bottom));
+        }
+        .rc-modal {
+            max-height: 85vh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            box-sizing: border-box;
+        }
+        /* Eingeloggt verdeckt die Adminleiste sonst den oberen Rand */
+        body.admin-bar .rc-overlay {
+            padding-top: max(62px, env(safe-area-inset-top));
+        }
+
         /* Ab sehr schmalen Screens: Aktions-Buttons stapeln statt quetschen */
         @media (max-width: 420px) {
             .rfat-pub-actions {
@@ -1098,6 +1125,29 @@ add_action('wp_footer', function () {
     (function () {
         var b = document.getElementById('rc-open');
         if (b) { b.textContent = b.textContent.replace(/[\u{1F4C5}\u{FE0F}]/gu, '').trim(); }
+
+        /*
+         * Diagnose für das Buchungs-Popup: Die Klassennamen .rc-overlay und
+         * .rc-modal sind aus dem gerenderten HTML rekonstruiert, nicht aus
+         * Quellcode. Ob unser CSS überhaupt etwas trifft, war deshalb bisher
+         * reine Vermutung. Nach dem Öffnen setzen wir eine Klasse auf <html>:
+         *
+         *   rfat-rc-ok      – .rc-modal existiert, unser CSS greift
+         *   rfat-rc-missing – Klasse heißt anders, das CSS läuft ins Leere
+         *
+         * Ein Blick in den Inspektor beantwortet damit eine Frage, die dieses
+         * Projekt schon mehrere wirkungslose Versionen gekostet hat.
+         */
+        if (b) {
+            b.addEventListener('click', function () {
+                window.setTimeout(function () {
+                    var found = document.querySelector('.rc-modal');
+                    document.documentElement.classList.add(
+                        found ? 'rfat-rc-ok' : 'rfat-rc-missing'
+                    );
+                }, 400);
+            });
+        }
 
         /*
          * Fallback: Falls die Navigation kein core/navigation-Block ist und
