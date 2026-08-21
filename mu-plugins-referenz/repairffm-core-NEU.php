@@ -83,207 +83,344 @@ function rc_booked_slot_ids() {
 }
 
 /* ---------------------------------------------------------------
- * 3) Shortcode [repairffm_booking] – Button + Popup
+ * 3) Terminbuchung als echte Seite
+ *
+ * Frueher war die Buchung ein Popup: ein Overlay, das per JavaScript
+ * ueber die Seite gelegt wurde, mit allen vier Schritten im selben
+ * Dokument. Drei Nachteile davon haben sich in der Praxis gezeigt --
+ * der Schliessen-Knopf war schwer zu treffen, der Zurueck-Knopf des
+ * Browsers verliess die ganze Seite statt einen Schritt zurueckzugehen,
+ * und ohne JavaScript ging gar nichts.
+ *
+ * Jetzt ist jeder Schritt eine echte Adresse. Schritt 1 und 2 sind
+ * Links, Schritt 3 ist ein gewoehnliches Formular, danach wird
+ * weitergeleitet (Post/Redirect/Get - so fuehrt Neuladen nicht zur
+ * Doppelbuchung). Zurueck, Neuladen, Lesezeichen und Weiterschicken
+ * funktionieren dadurch von selbst, und die Buchung laeuft auch ohne
+ * JavaScript.
+ *
+ *   /termin-buchen/                          Kategorie waehlen
+ *   /termin-buchen/?was=it                   freien Termin waehlen
+ *   /termin-buchen/?was=it&wann=<slot>       bestaetigen
+ *   /termin-buchen/?code=RC-XXXXX            fertig
  * ------------------------------------------------------------- */
-add_shortcode('repairffm_booking', function () {
-    $GLOBALS['rc_booking_used'] = true;
-    return '<div id="rc-book"><button class="btn big" id="rc-open">📅 Termin buchen</button>'
-         . '<noscript><p>Bitte aktiviere JavaScript, um einen Termin zu buchen.</p></noscript></div>';
-});
 
-// Popup + Assets erst im Footer ausgeben, damit wpautop die Struktur nicht zerstoert
-add_action('wp_footer', function () {
-    if (empty($GLOBALS['rc_booking_used'])) return;
-    $slots = rc_build_slots();
-    $booked = rc_booked_slot_ids();
-    foreach ($slots as &$s) { $s['free'] = empty($booked[$s['id']]); }
-    unset($s);
-    $data = array(
-        'nonce' => wp_create_nonce('rc_book'),
-        'ajax'  => admin_url('admin-ajax.php'),
-        'cats'  => rc_categories(),
-        'slots' => $slots,
-    );
-    $json = wp_json_encode($data);
-    ?>
-    <div class="rc-overlay" id="rc-overlay" hidden>
-      <div class="rc-modal" role="dialog" aria-modal="true" aria-label="Termin buchen">
-        <button class="rc-close" id="rc-close" aria-label="Schließen">×</button>
-        <div class="rc-steps">
-          <div class="rc-step" data-step="1">
-            <h3>1. Was möchtest du reparieren?</h3>
-            <div class="rc-cats"></div>
-          </div>
-          <div class="rc-step" data-step="2" hidden>
-            <button class="rc-back" data-to="1">&larr; zurück</button>
-            <h3>2. Freien Termin wählen</h3>
-            <div class="rc-slots"></div>
-          </div>
-          <div class="rc-step" data-step="3" hidden>
-            <button class="rc-back" data-to="2">&larr; zurück</button>
-            <h3>3. Bestätigen</h3>
-            <p class="rc-summary"></p>
-            <label class="rc-note-label">Kurz: Was ist kaputt? <span>(freiwillig, keine persönlichen Angaben nötig)</span></label>
-            <textarea id="rc-note" rows="3" placeholder="z. B. 'Handy-Akku hält nicht mehr' oder 'E-Bike bremst schleift'"></textarea>
-            <button class="btn" id="rc-confirm">Verbindlich buchen</button>
-            <p class="rc-error" hidden></p>
-          </div>
-          <div class="rc-step" data-step="done" hidden>
-            <div class="rc-ok">✅</div>
-            <h3>Termin vorgemerkt</h3>
-            <p class="rc-done-summary"></p>
-            <p>Dein Buchungscode: <strong class="rc-code"></strong></p>
-            <p class="rc-hint">Bitte warte noch auf unsere Bestätigung &ndash; erst dann steht dein Termin fest.
-              Notiere dir den Code (oder mach einen Screenshot). Möchtest du benachrichtigt werden,
-              kannst du unten freiwillig eine E-Mail hinterlassen. Bis bald! 🔧</p>
-            <button class="btn ghost" id="rc-again">Weiteren Termin buchen</button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <style>
-      .rc-overlay{position:fixed;inset:0;background:rgba(20,35,28,.55);align-items:center;justify-content:center;padding:16px;z-index:1000}
-      .rc-overlay:not([hidden]){display:flex}
-      .rc-modal{background:#fff;border-radius:16px;max-width:560px;width:100%;max-height:90vh;overflow:auto;padding:26px;position:relative;box-shadow:0 20px 60px rgba(0,0,0,.3)}
-      .rc-close{position:absolute;top:12px;right:14px;border:0;background:transparent;font-size:30px;line-height:1;cursor:pointer;color:#5b6b62}
-      .rc-modal h3{margin:0 0 16px;font-size:21px}
-      .rc-back{background:transparent;border:0;color:#1f5a38;font-weight:600;cursor:pointer;padding:0 0 12px;font-size:15px}
-      .rc-cats{display:grid;gap:12px}
-      .rc-cat{display:block;width:100%;text-align:left;background:#e8f1eb;border:2px solid transparent;border-radius:12px;padding:18px;font-size:17px;font-weight:700;color:#1c2a22;cursor:pointer}
-      .rc-cat:hover{border-color:#2f7d4f}
-      .rc-daygroup{margin-bottom:18px}
-      .rc-daygroup h4{margin:0 0 8px;font-size:15px;color:#5b6b62}
-      .rc-slotgrid{display:flex;flex-wrap:wrap;gap:8px}
-      .rc-slot{background:#fff;border:2px solid #2f7d4f;color:#1f5a38;border-radius:10px;padding:9px 14px;font-weight:700;cursor:pointer;font-size:15px}
-      .rc-slot:hover{background:#2f7d4f;color:#fff}
-      .rc-slot[disabled]{border-color:#dfe4e0;color:#b7c1ba;background:#f4f6f4;cursor:not-allowed;text-decoration:line-through}
-      .rc-note-label{display:block;margin:6px 0 6px;font-weight:600}
-      .rc-note-label span{font-weight:400;color:#5b6b62;font-size:14px}
-      #rc-note{width:100%;border:1px solid #cfd8d2;border-radius:10px;padding:10px;font:inherit;margin-bottom:16px}
-      .rc-summary,.rc-done-summary{background:#e8f1eb;border-radius:10px;padding:12px 14px;font-weight:600}
-      .rc-error{color:#a12; font-weight:600}
-      .rc-ok{font-size:44px}
-      .rc-code{font-size:22px;letter-spacing:1px;color:#1f5a38}
-      .rc-hint{color:#5b6b62;font-size:14.5px}
-    </style>
-
-    <script>
-    (function(){
-      var D = <?php echo $json; ?>;
-      var overlay = document.getElementById('rc-overlay');
-      var openBtn = document.getElementById('rc-open');
-      var pick = { cat:null, slot:null };
-
-      function show(step){
-        overlay.querySelectorAll('.rc-step').forEach(function(s){ s.hidden = (s.getAttribute('data-step') !== step); });
-      }
-      function open(){ overlay.hidden = false; buildCats(); show('1'); }
-      function close(){ overlay.hidden = true; }
-
-      openBtn && openBtn.addEventListener('click', open);
-      document.getElementById('rc-close').addEventListener('click', close);
-      overlay.addEventListener('click', function(e){ if(e.target===overlay) close(); });
-      overlay.querySelectorAll('.rc-back').forEach(function(b){ b.addEventListener('click', function(){ show(b.getAttribute('data-to')); }); });
-
-      function buildCats(){
-        var wrap = overlay.querySelector('.rc-cats'); wrap.innerHTML='';
-        Object.keys(D.cats).forEach(function(ck){
-          var b=document.createElement('button'); b.className='rc-cat'; b.textContent=D.cats[ck];
-          b.addEventListener('click', function(){ pick.cat=ck; buildSlots(ck); show('2'); });
-          wrap.appendChild(b);
-        });
-      }
-      function buildSlots(cat){
-        var wrap = overlay.querySelector('.rc-slots'); wrap.innerHTML='';
-        var byDate = {};
-        D.slots.filter(function(s){return s.cat===cat;}).forEach(function(s){
-          (byDate[s.date]=byDate[s.date]||{label:s.dateLabel,items:[]}).items.push(s);
-        });
-        var keys = Object.keys(byDate).sort();
-        if(!keys.length){ wrap.innerHTML='<p>Zurzeit keine Termine frei.</p>'; return; }
-        keys.forEach(function(d){
-          var g=document.createElement('div'); g.className='rc-daygroup';
-          var h=document.createElement('h4'); h.textContent=byDate[d].label; g.appendChild(h);
-          var grid=document.createElement('div'); grid.className='rc-slotgrid';
-          byDate[d].items.forEach(function(s){
-            var b=document.createElement('button'); b.className='rc-slot'; b.textContent=s.time+' Uhr';
-            if(!s.free){ b.disabled=true; b.title='schon vergeben'; }
-            else b.addEventListener('click', function(){ pick.slot=s; goConfirm(s); });
-            grid.appendChild(b);
-          });
-          g.appendChild(grid); wrap.appendChild(g);
-        });
-      }
-      function goConfirm(s){
-        overlay.querySelector('.rc-summary').textContent = D.cats[s.cat] + ' — ' + s.dateLabel + ', ' + s.time + ' Uhr';
-        overlay.querySelector('.rc-error').hidden = true;
-        show('3');
-      }
-      document.getElementById('rc-confirm').addEventListener('click', function(){
-        var btn=this; btn.disabled=true; btn.textContent='Buche…';
-        var note=document.getElementById('rc-note').value.slice(0,300);
-        var body='action=rc_book&nonce='+encodeURIComponent(D.nonce)+'&slot='+encodeURIComponent(pick.slot.id)+'&note='+encodeURIComponent(note);
-        fetch(D.ajax,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
-          .then(function(r){return r.json();})
-          .then(function(j){
-            btn.disabled=false; btn.textContent='Verbindlich buchen';
-            if(j && j.ok){
-              overlay.querySelector('.rc-done-summary').textContent = D.cats[pick.slot.cat]+' — '+pick.slot.dateLabel+', '+pick.slot.time+' Uhr';
-              overlay.querySelector('.rc-code').textContent = j.code;
-              show('done');
-            } else {
-              var e=overlay.querySelector('.rc-error'); e.hidden=false;
-              e.textContent = (j && j.msg) ? j.msg : 'Buchung fehlgeschlagen. Bitte anderen Slot wählen.';
-            }
-          })
-          .catch(function(){ btn.disabled=false; btn.textContent='Verbindlich buchen';
-            var e=overlay.querySelector('.rc-error'); e.hidden=false; e.textContent='Netzwerkfehler. Bitte erneut versuchen.'; });
-      });
-      document.getElementById('rc-again').addEventListener('click', function(){ pick={cat:null,slot:null}; document.getElementById('rc-note').value=''; open(); });
-    })();
-    </script>
-    <?php
-});
-
-/* ---------------------------------------------------------------
- * 4) AJAX: Buchung speichern (anonym), Doppelbuchung verhindern
- * ------------------------------------------------------------- */
-function rc_handle_book() {
-    if (!isset($_POST['nonce']) || !wp_verify_nonce($_POST['nonce'], 'rc_book')) {
-        wp_send_json(array('ok'=>false,'msg'=>'Sicherheitsprüfung fehlgeschlagen. Seite neu laden.'));
+/**
+ * Adresse der Buchungsseite mit den uebergebenen Schritt-Parametern.
+ * Baut auf der aktuellen Seite auf, damit der Shortcode auch dann
+ * funktioniert, wenn er einmal auf einer anders benannten Seite steht.
+ */
+function rc_booking_page_url($args = array()) {
+    $url = get_permalink(get_queried_object_id());
+    if (!$url) $url = home_url('/termin-buchen/');
+    foreach ($args as $k => $v) {
+        if ($v === null || $v === '') continue;
+        $url = add_query_arg($k, $v, $url);
     }
-    $slot = isset($_POST['slot']) ? sanitize_text_field(wp_unslash($_POST['slot'])) : '';
-    $note = isset($_POST['note']) ? sanitize_textarea_field(wp_unslash($_POST['note'])) : '';
+    return $url;
+}
 
-    // Slot gegen generierte Slots validieren
-    $valid = false; $slotInfo = null;
-    foreach (rc_build_slots() as $s) { if ($s['id'] === $slot) { $valid = true; $slotInfo = $s; break; } }
-    if (!$valid) wp_send_json(array('ok'=>false,'msg'=>'Ungültiger Termin. Bitte neu wählen.'));
+function rc_slot_by_id($id) {
+    foreach (rc_build_slots() as $s) {
+        if ($s['id'] === $id) return $s;
+    }
+    return null;
+}
 
-    // Bereits vergeben?
-    $existing = get_posts(array('post_type'=>'rc_booking','numberposts'=>1,'post_status'=>'publish','fields'=>'ids',
-        'meta_key'=>'_rc_slot','meta_value'=>$slot));
-    if (!empty($existing)) wp_send_json(array('ok'=>false,'msg'=>'Dieser Termin ist gerade vergeben worden. Bitte anderen wählen.'));
-
-    $cats = rc_categories();
-    $code = 'RC-' . strtoupper(substr(str_shuffle('ABCDEFGHJKLMNPQRSTUVWXYZ23456789'), 0, 5));
-    $title = $slotInfo['dateLabel'] . ' ' . $slotInfo['time'] . ' – ' . $cats[$slotInfo['cat']] . ' [' . $code . ']';
-    $pid = wp_insert_post(array(
-        'post_type'=>'rc_booking','post_status'=>'publish','post_title'=>$title,
+function rc_booking_by_code($code) {
+    $code = strtoupper(trim((string) $code));
+    if ($code === '') return null;
+    $q = get_posts(array(
+        'post_type'   => 'rc_booking',
+        'numberposts' => 1,
+        'post_status' => 'publish',
+        'meta_key'    => '_rc_code',
+        'meta_value'  => $code,
     ));
-    if (!$pid || is_wp_error($pid)) wp_send_json(array('ok'=>false,'msg'=>'Speichern fehlgeschlagen. Bitte erneut versuchen.'));
-    update_post_meta($pid, '_rc_slot', $slot);
+    return $q ? $q[0] : null;
+}
+
+/**
+ * Fehlermeldungen als feste Schluessel statt als Text in der Adresse:
+ * sonst koennte ueber einen praeparierten Link ein beliebiger Satz auf
+ * der eigenen Seite erscheinen.
+ */
+function rc_booking_errors() {
+    return array(
+        'nonce'     => 'Die Sicherheitsprüfung ist fehlgeschlagen. Das passiert meist, wenn die Seite lange offen lag. Bitte den Termin noch einmal auswählen.',
+        'weg'       => 'Diesen Termin gibt es nicht mehr. Bitte einen anderen wählen.',
+        'belegt'    => 'Dieser Termin ist gerade vergeben worden. Bitte einen anderen wählen.',
+        'speichern' => 'Das Speichern hat nicht geklappt. Bitte noch einmal versuchen.',
+    );
+}
+
+/**
+ * Legt die Buchung an. Gibt array('ok'=>true,'code'=>...) zurueck oder
+ * array('ok'=>false,'err'=>'<schluessel>').
+ */
+function rc_create_booking($slot_id, $note) {
+    $slot = rc_slot_by_id($slot_id);
+    if (!$slot) return array('ok' => false, 'err' => 'weg');
+
+    $existing = get_posts(array(
+        'post_type' => 'rc_booking', 'numberposts' => 1, 'post_status' => 'publish',
+        'fields' => 'ids', 'meta_key' => '_rc_slot', 'meta_value' => $slot_id,
+    ));
+    if (!empty($existing)) return array('ok' => false, 'err' => 'belegt');
+
+    $cats  = rc_categories();
+    $code  = 'RC-' . strtoupper(substr(str_shuffle('ABCDEFGHJKLMNPQRSTUVWXYZ23456789'), 0, 5));
+    $title = $slot['dateLabel'] . ' ' . $slot['time'] . ' – ' . $cats[$slot['cat']] . ' [' . $code . ']';
+
+    $pid = wp_insert_post(array(
+        'post_type' => 'rc_booking', 'post_status' => 'publish', 'post_title' => $title,
+    ));
+    if (!$pid || is_wp_error($pid)) return array('ok' => false, 'err' => 'speichern');
+
+    update_post_meta($pid, '_rc_slot', $slot_id);
     update_post_meta($pid, '_rc_code', $code);
-    update_post_meta($pid, '_rc_cat', $slotInfo['cat']);
-    update_post_meta($pid, '_rc_date', $slotInfo['date']);
-    update_post_meta($pid, '_rc_time', $slotInfo['time']);
+    update_post_meta($pid, '_rc_cat',  $slot['cat']);
+    update_post_meta($pid, '_rc_date', $slot['date']);
+    update_post_meta($pid, '_rc_time', $slot['time']);
     if ($note !== '') update_post_meta($pid, '_rc_note', $note);
 
-    wp_send_json(array('ok'=>true,'code'=>$code));
+    return array('ok' => true, 'code' => $code);
 }
-add_action('wp_ajax_rc_book', 'rc_handle_book');
-add_action('wp_ajax_nopriv_rc_book', 'rc_handle_book');
+
+/**
+ * Das abgeschickte Formular aus Schritt 3 entgegennehmen, bevor
+ * irgendetwas ausgegeben wurde - danach ist keine Weiterleitung mehr
+ * moeglich.
+ */
+add_action('template_redirect', function () {
+    if (empty($_POST['rc_book_submit'])) return;
+
+    $slot_id = isset($_POST['slot']) ? sanitize_text_field(wp_unslash($_POST['slot'])) : '';
+    $note    = isset($_POST['note']) ? sanitize_textarea_field(wp_unslash($_POST['note'])) : '';
+    $slot    = rc_slot_by_id($slot_id);
+    $back    = rc_booking_page_url(array(
+        'was'  => $slot ? $slot['cat'] : '',
+        'wann' => $slot_id,
+    ));
+
+    if (!isset($_POST['rc_nonce']) || !wp_verify_nonce(wp_unslash($_POST['rc_nonce']), 'rc_book')) {
+        wp_safe_redirect(add_query_arg('fehler', 'nonce', $back));
+        exit;
+    }
+
+    $res = rc_create_booking($slot_id, mb_substr($note, 0, 300));
+    if (!$res['ok']) {
+        $target = ($res['err'] === 'weg') ? rc_booking_page_url() : $back;
+        wp_safe_redirect(add_query_arg('fehler', $res['err'], $target));
+        exit;
+    }
+
+    wp_safe_redirect(rc_booking_page_url(array('code' => $res['code'])));
+    exit;
+}, 5);
+
+/**
+ * Die Seite zeigt, welche Termine frei sind - eine zwischengespeicherte
+ * Fassung wuerde vergebene Termine als frei anbieten.
+ */
+add_action('template_redirect', function () {
+    if (!is_singular()) return;
+    $content = (string) get_post_field('post_content', get_queried_object_id());
+    if (has_shortcode($content, 'repairffm_booking')) nocache_headers();
+}, 6);
+
+add_shortcode('repairffm_booking', function () {
+
+    $code = isset($_GET['code']) ? sanitize_text_field(wp_unslash($_GET['code'])) : '';
+    if ($code !== '') return rc_step_done($code);
+
+    $slot_id = isset($_GET['wann']) ? sanitize_text_field(wp_unslash($_GET['wann'])) : '';
+    if ($slot_id !== '') {
+        $slot = rc_slot_by_id($slot_id);
+        if ($slot) return rc_step_confirm($slot);
+    }
+
+    $cat  = isset($_GET['was']) ? sanitize_key(wp_unslash($_GET['was'])) : '';
+    $cats = rc_categories();
+    if ($cat !== '' && isset($cats[$cat])) return rc_step_slots($cat);
+
+    return rc_step_cats();
+});
+
+function rc_booking_error_html() {
+    $key  = isset($_GET['fehler']) ? sanitize_key(wp_unslash($_GET['fehler'])) : '';
+    $msgs = rc_booking_errors();
+    if ($key === '' || !isset($msgs[$key])) return '';
+    return '<p class="rc-error" role="alert">' . esc_html($msgs[$key]) . '</p>';
+}
+
+function rc_step_cats() {
+    ob_start(); ?>
+    <div class="rc-book">
+      <?php echo rc_booking_error_html(); ?>
+      <h2 class="rc-h">1. Was möchtest du reparieren?</h2>
+      <div class="rc-cats">
+        <?php foreach (rc_categories() as $ck => $cl): ?>
+          <a class="rc-cat" href="<?php echo esc_url(rc_booking_page_url(array('was' => $ck))); ?>"><?php echo esc_html($cl); ?></a>
+        <?php endforeach; ?>
+      </div>
+    </div>
+    <?php return ob_get_clean();
+}
+
+function rc_step_slots($cat) {
+    $cats   = rc_categories();
+    $booked = rc_booked_slot_ids();
+
+    $days = array();
+    foreach (rc_build_slots() as $s) {
+        if ($s['cat'] !== $cat) continue;
+        if (!isset($days[$s['date']])) $days[$s['date']] = array('label' => $s['dateLabel'], 'items' => array());
+        $s['free'] = empty($booked[$s['id']]);
+        $days[$s['date']]['items'][] = $s;
+    }
+    ksort($days);
+
+    ob_start(); ?>
+    <div class="rc-book">
+      <p class="rc-back"><a href="<?php echo esc_url(rc_booking_page_url()); ?>">&larr; andere Kategorie</a></p>
+      <?php echo rc_booking_error_html(); ?>
+      <h2 class="rc-h">2. Freien Termin wählen</h2>
+      <p class="rc-chosen"><?php echo esc_html($cats[$cat]); ?></p>
+      <?php if (!$days): ?>
+        <p>Zurzeit sind keine Termine frei. Schau in ein paar Tagen noch einmal vorbei.</p>
+      <?php endif; ?>
+      <?php foreach ($days as $day): ?>
+        <div class="rc-daygroup">
+          <h3><?php echo esc_html($day['label']); ?></h3>
+          <div class="rc-slotgrid">
+            <?php foreach ($day['items'] as $s): ?>
+              <?php if ($s['free']): ?>
+                <a class="rc-slot" href="<?php echo esc_url(rc_booking_page_url(array('was' => $cat, 'wann' => $s['id']))); ?>"><?php echo esc_html($s['time']); ?> Uhr</a>
+              <?php else: ?>
+                <span class="rc-slot is-taken" title="schon vergeben"><?php echo esc_html($s['time']); ?> Uhr</span>
+              <?php endif; ?>
+            <?php endforeach; ?>
+          </div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+    <?php return ob_get_clean();
+}
+
+function rc_step_confirm($slot) {
+    $cats = rc_categories();
+    ob_start(); ?>
+    <div class="rc-book">
+      <p class="rc-back"><a href="<?php echo esc_url(rc_booking_page_url(array('was' => $slot['cat']))); ?>">&larr; anderer Termin</a></p>
+      <?php echo rc_booking_error_html(); ?>
+      <h2 class="rc-h">3. Anfrage abschicken</h2>
+      <p class="rc-summary"><?php echo esc_html($cats[$slot['cat']] . ' — ' . $slot['dateLabel'] . ', ' . $slot['time'] . ' Uhr'); ?></p>
+      <form method="post" action="<?php echo esc_url(rc_booking_page_url(array('was' => $slot['cat'], 'wann' => $slot['id']))); ?>">
+        <?php wp_nonce_field('rc_book', 'rc_nonce'); ?>
+        <input type="hidden" name="slot" value="<?php echo esc_attr($slot['id']); ?>">
+        <label class="rc-note-label" for="rc-note">Kurz: Was ist kaputt? <span>(freiwillig, keine persönlichen Angaben nötig)</span></label>
+        <textarea id="rc-note" name="note" rows="3" maxlength="300" placeholder="z. B. 'Handy-Akku hält nicht mehr' oder 'E-Bike bremst schleift'"></textarea>
+        <button type="submit" name="rc_book_submit" value="1" class="rc-btn">Termin anfragen</button>
+        <p class="rc-hint">Der Termin ist damit vorgemerkt, aber noch nicht bestätigt. Wir sehen uns die Anfrage an und melden uns.</p>
+      </form>
+    </div>
+    <?php return ob_get_clean();
+}
+
+function rc_step_done($code) {
+    $post = rc_booking_by_code($code);
+    if (!$post) {
+        ob_start(); ?>
+        <div class="rc-book">
+          <p class="rc-error">Zu diesem Code haben wir keine Anfrage gefunden. Möglicherweise ist der Termin schon vorbei und die Daten wurden gelöscht.</p>
+          <p><a class="rc-btn" href="<?php echo esc_url(rc_booking_page_url()); ?>">Neuen Termin wählen</a></p>
+        </div>
+        <?php return ob_get_clean();
+    }
+
+    $cats = rc_categories();
+    $cat  = get_post_meta($post->ID, '_rc_cat', true);
+    $date = get_post_meta($post->ID, '_rc_date', true);
+    $time = get_post_meta($post->ID, '_rc_time', true);
+    $when = '';
+    if ($date) {
+        $d = date_create($date);
+        if ($d) $when = rc_weekday_de($d->format('w')) . ', ' . $d->format('d.m.Y');
+    }
+
+    ob_start(); ?>
+    <div class="rc-book rc-done">
+      <div class="rc-ok">✅</div>
+      <h2 class="rc-h">Termin vorgemerkt</h2>
+      <p class="rc-summary"><?php
+        $teile = array();
+        if (isset($cats[$cat])) $teile[] = $cats[$cat];
+        if ($when !== '')       $teile[] = $when . ($time ? ', ' . $time . ' Uhr' : '');
+        echo esc_html($teile ? implode(' — ', $teile) : 'Termin gespeichert');
+      ?></p>
+      <p>Dein Buchungscode: <strong class="rc-code"><?php echo esc_html(get_post_meta($post->ID, '_rc_code', true)); ?></strong></p>
+      <p class="rc-hint">Bitte warte noch auf unsere Bestätigung &ndash; erst dann steht dein Termin fest.
+        Notiere dir den Code oder mach einen Screenshot; damit kommst du jederzeit wieder an deinen Termin.</p>
+
+      <?php
+      /* Anknuepfpunkt fuer das Begleit-Plugin: dort haengt das freiwillige
+       * E-Mail-Feld und der Kalender-Knopf. Ist es nicht aktiv, steht hier
+       * einfach nichts - die Buchung ist trotzdem vollstaendig. */
+      do_action('repairffm_after_booking', get_post_meta($post->ID, '_rc_code', true), $post->ID);
+      ?>
+
+      <p class="rc-again"><a href="<?php echo esc_url(rc_booking_page_url()); ?>">Weiteren Termin anfragen</a></p>
+    </div>
+    <?php return ob_get_clean();
+}
+
+/* Nur auf der Buchungsseite ausgeben, und im Kopf statt mitten im Text. */
+add_action('wp_head', function () {
+    if (!is_singular()) return;
+    $content = (string) get_post_field('post_content', get_queried_object_id());
+    if (!has_shortcode($content, 'repairffm_booking')) return;
+    ?>
+    <style>
+      .rc-book{max-width:620px}
+      .rc-h{margin:0 0 14px;font-size:22px}
+      .rc-back{margin:0 0 10px}
+      .rc-back a{color:#1f5a38;font-weight:600;text-decoration:none;font-size:15px}
+      .rc-back a:hover{text-decoration:underline}
+      .rc-cats{display:grid;gap:12px}
+      .rc-cat{display:block;background:#e8f1eb;border:2px solid transparent;border-radius:12px;padding:18px;
+        font-size:17px;font-weight:700;color:#1c2a22;text-decoration:none}
+      .rc-cat:hover,.rc-cat:focus{border-color:#2f7d4f;color:#1c2a22}
+      .rc-chosen{color:#5b6b62;margin:0 0 18px}
+      .rc-daygroup{margin-bottom:18px}
+      .rc-daygroup h3{margin:0 0 8px;font-size:15px;color:#5b6b62;font-weight:600}
+      .rc-slotgrid{display:flex;flex-wrap:wrap;gap:8px}
+      .rc-slot{display:inline-block;background:#fff;border:2px solid #2f7d4f;color:#1f5a38;border-radius:10px;
+        padding:11px 16px;font-weight:700;font-size:16px;text-decoration:none;min-height:44px;line-height:20px;box-sizing:border-box}
+      .rc-slot:hover,.rc-slot:focus{background:#2f7d4f;color:#fff}
+      .rc-slot.is-taken{border-color:#dfe4e0;color:#b7c1ba;background:#f4f6f4;text-decoration:line-through;cursor:not-allowed}
+      .rc-slot.is-taken:hover{background:#f4f6f4;color:#b7c1ba}
+      .rc-summary{background:#e8f1eb;border-radius:10px;padding:12px 14px;font-weight:600;margin:0 0 16px}
+      .rc-note-label{display:block;margin:6px 0 6px;font-weight:600}
+      .rc-note-label span{font-weight:400;color:#5b6b62;font-size:14px}
+      #rc-note{width:100%;border:1px solid #cfd8d2;border-radius:10px;padding:10px;font:inherit;margin-bottom:16px;box-sizing:border-box}
+      .rc-btn{display:inline-block;background:#2f7d4f;color:#fff;border:0;border-radius:10px;padding:14px 22px;
+        font-size:17px;font-weight:700;cursor:pointer;text-decoration:none;font-family:inherit}
+      .rc-btn:hover,.rc-btn:focus{background:#1f5a38;color:#fff}
+      .rc-hint{color:#5b6b62;font-size:14.5px;margin-top:12px}
+      .rc-error{background:#fdecec;border-left:4px solid #a12;color:#7a1010;font-weight:600;padding:12px 14px;
+        border-radius:8px;margin:0 0 16px}
+      .rc-ok{font-size:44px;line-height:1}
+      .rc-code{font-size:24px;letter-spacing:1px;color:#1f5a38}
+      .rc-again{margin-top:26px}
+      .rc-again a{color:#1f5a38;font-weight:600}
+      @media(max-width:600px){
+        .rc-slot{flex:1 1 calc(50% - 8px);text-align:center}
+        .rc-btn{width:100%;text-align:center}
+      }
+    </style>
+    <?php
+});
 
 /* ---------------------------------------------------------------
  * 5) Admin-Spalten fuer Buchungen
