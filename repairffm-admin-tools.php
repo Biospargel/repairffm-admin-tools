@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.15.0
+ * Version: 1.16.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -924,12 +924,72 @@ add_action('untrashed_post',     'rfat_caches_verwerfen', 10, 2);
 // Vor dem Loeschen, solange die Meta-Felder noch lesbar sind.
 add_action('before_delete_post', 'rfat_caches_verwerfen', 10, 2);
 
+/**
+ * Sicherstellen, dass es /termin-abrufen/ gibt.
+ *
+ * Die Seite wurde bisher nirgends angelegt — sie existierte nur, weil sie
+ * einmal von Hand erstellt worden war. Verlinkt wird sie an einem Dutzend
+ * Stellen (Bestaetigungsmails, Abmeldelink, Kalendereintrag), und seit die
+ * Buchung direkt dorthin fuehrt, haengt der ganze Ablauf daran. Eine
+ * versehentlich geloeschte Seite wuerde ihn abreissen.
+ *
+ * Laeuft einmalig; die Option verhindert eine Abfrage bei jedem Aufruf.
+ */
+add_action('init', function () {
+    if (get_option('rfat_abrufseite') === '1') {
+        return;
+    }
+
+    $seite = get_page_by_path('termin-abrufen');
+
+    if (!$seite) {
+        wp_insert_post([
+            'post_title'   => 'Termin abrufen',
+            'post_name'    => 'termin-abrufen',
+            'post_type'    => 'page',
+            'post_status'  => 'publish',
+            'post_content' => "<p>Gib deinen Buchungscode ein, um deinen Termin anzusehen, "
+                            . "eine E-Mail zu hinterlegen, ihn zu verschieben oder abzusagen.</p>\n"
+                            . "[rfat_manage_booking]",
+        ]);
+    } else {
+        $aenderung = ['ID' => $seite->ID];
+        if ($seite->post_status !== 'publish') {
+            $aenderung['post_status'] = 'publish';
+        }
+        // Fehlt der Shortcode, anhaengen statt den Text zu ueberschreiben —
+        // was dort steht, gehoert dem Betreiber.
+        if (!has_shortcode($seite->post_content, 'rfat_manage_booking')) {
+            $aenderung['post_content'] = $seite->post_content . "\n[rfat_manage_booking]";
+        }
+        if (count($aenderung) > 1) {
+            wp_update_post($aenderung);
+        }
+    }
+
+    update_option('rfat_abrufseite', '1');
+}, 25);
+
 add_shortcode('rfat_manage_booking', function ($atts) {
     if (!post_type_exists('rc_booking')) {
         return '<p>Die Terminverwaltung ist gerade nicht verfügbar.</p>';
     }
 
     $notice = '';
+
+    /*
+     * Direkt aus der Buchung hierher gesprungen. Die Zwischenseite mit
+     * "Termin vorgemerkt" entfaellt dadurch — der Hinweis, der dort stand,
+     * darf aber nicht mit verschwinden: Der Code ist das Einzige, womit
+     * man spaeter wieder an den Termin kommt.
+     */
+    if (!empty($_GET['neu'])) {
+        $notice = '<div class="rfat-pub-notice rfat-pub-success">'
+                . '<strong>Termin vorgemerkt.</strong> Bitte warte noch auf unsere '
+                . 'Bestätigung &ndash; erst dann steht er fest. Notiere dir deinen Code '
+                . 'oder speichere den Link weiter unten; damit kommst du jederzeit '
+                . 'wieder hierher.</div>';
+    }
     $found = null;
     $code_value = '';
 
@@ -1768,88 +1828,6 @@ add_action('wp_head', function () {
         .rfat-status-sep { opacity: .5; }
         .rfat-status-version { font-variant-numeric: tabular-nums; }
 
-        /* Block, den wir nach der Buchung in den fremden Dialog hängen */
-        .rfat-after-booking {
-            margin: 18px 0;
-            padding: 16px 18px;
-            border: 1px solid #dbe6df;
-            border-radius: 16px;
-            background: #f4f8f5;
-            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            text-align: left;
-        }
-        .rfat-ab-head {
-            margin: 0 0 6px;
-            font-size: 15px;
-            font-weight: 700;
-            color: #1c2a22;
-        }
-        .rfat-ab-text {
-            margin: 0 0 14px;
-            font-size: 13px;
-            line-height: 1.5;
-            color: #5b6b62;
-        }
-        .rfat-ab-input {
-            display: block;
-            box-sizing: border-box;
-            width: 100%;
-            padding: 12px 14px;
-            margin-bottom: 10px;
-            border: 1.5px solid #d7e0da;
-            border-radius: 11px;
-            background: #fff;
-            color: #1c2a22;
-            font-size: 16px; /* unter 16px zoomt iOS beim Antippen hinein */
-            font-family: inherit;
-        }
-        .rfat-ab-input:focus {
-            outline: none;
-            border-color: #2f7d4f;
-            box-shadow: 0 0 0 3px rgba(47, 125, 79, .15);
-        }
-        .rfat-ab-keep {
-            display: flex;
-            gap: 9px;
-            align-items: flex-start;
-            margin: 0 0 12px;
-            font-size: 12px;
-            line-height: 1.45;
-            color: #5b6b62;
-            cursor: pointer;
-        }
-        .rfat-ab-keep input { margin-top: 2px; flex-shrink: 0; width: 17px; height: 17px; }
-        .rfat-ab-hint { margin: 0 0 10px; font-size: 13px; color: #b3402f; }
-        .rfat-ab-cal { margin: 12px 0 0; font-size: 13px; text-align: center; }
-        .rfat-ab-cal a { color: #2f7d4f; font-weight: 600; }
-        .rfat-ab-btn[disabled] { opacity: .65; cursor: default; }
-
-        .rfat-ab-row { display: flex; flex-direction: column; gap: 8px; }
-        .rfat-ab-btn {
-            display: block;
-            box-sizing: border-box;
-            width: 100%;
-            padding: 12px 16px;
-            border-radius: 11px;
-            background: #2f7d4f;
-            color: #fff !important;
-            font-size: 15px;
-            font-weight: 700;
-            text-align: center;
-            text-decoration: none !important;
-        }
-        .rfat-ab-btn:hover,
-        .rfat-ab-btn:focus-visible { background: #256a42; }
-        .rfat-ab-ghost {
-            background: transparent;
-            color: #2f7d4f !important;
-            border: 2px solid #2f7d4f;
-        }
-        .rfat-ab-ghost:hover,
-        .rfat-ab-ghost:focus-visible {
-            background: #e8f1eb;
-            color: #1f5a38 !important;
-        }
         /* Eingeloggt verdeckt die Adminleiste sonst den oberen Rand */
 
         /* Ab sehr schmalen Screens: Aktions-Buttons stapeln statt quetschen */
@@ -2098,132 +2076,13 @@ add_action('wp_footer', function () {
     <?php
 }, 1001);
 
-/* =========================================================================
- * E-MAIL DIREKT IM BESTÄTIGUNGSSCHRITT
- *
- * Früher hing dieser Block per JavaScript im Buchungs-Popup des
- * Kern-Plugins: ein MutationObserver wartete, bis im Overlay ein
- * Buchungscode auftauchte, und schob dann ein Eingabefeld hinein.
- * Das war ein Behelf — wir kannten den fremden Quelltext nicht und
- * konnten ihn nicht ändern.
- *
- * Seit die Buchung eine echte Seite ist, gibt es dafür einen sauberen
- * Anknüpfpunkt: Das Kern-Plugin ruft am Ende `repairffm_after_booking`
- * auf. Wir hängen uns dort ein und geben gewöhnliches HTML aus. Kein
- * Beobachten fremder DOM-Zustände, kein Erraten von Klassennamen, und
- * es funktioniert auch ohne JavaScript.
- *
- * Der Buchungscode ist der Ausweis — wie überall sonst hier auch. Wer ihn
- * hat, hat gerade gebucht.
- * ========================================================================= */
-add_action('repairffm_after_booking', 'rfat_after_booking_box', 10, 2);
-
-function rfat_after_booking_box($code, $post_id) {
-    $code = rfat_normalize_code((string) $code);
-    if ($code === '') {
-        return;
-    }
-
-    // Adresse schon hinterlegt (z. B. nach Neuladen der Seite)? Dann nicht
-    // noch einmal fragen, sondern bestätigen.
-    if ($post_id && get_post_meta($post_id, RFAT_EMAIL_META, true) !== '') {
-        ?>
-        <div class="rfat-after-booking">
-            <p class="rfat-ab-head">Adresse gespeichert</p>
-            <p class="rfat-ab-text">Wir melden uns, sobald der Termin bestätigt ist.</p>
-            <div class="rfat-ab-row">
-                <a class="rfat-ab-btn" href="<?php echo esc_url(home_url('/termin-abrufen/?code=' . rawurlencode($code))); ?>">Zur Terminübersicht</a>
-            </div>
-            <p class="rfat-ab-cal"><a href="<?php echo esc_url(add_query_arg('ics', $code, home_url('/termin-buchen/'))); ?>">&#128197; Zum Kalender hinzufügen</a></p>
-        </div>
-        <?php
-        return;
-    }
-
-    $fehler = isset($_GET['rfat_mail']) ? sanitize_key(wp_unslash($_GET['rfat_mail'])) : '';
-    $meldung = '';
-    if ($fehler === 'ungueltig') {
-        $meldung = 'Das sah nicht nach einer E-Mail-Adresse aus. Bitte noch einmal versuchen — oder unten ohne fortfahren.';
-    } elseif ($fehler === 'unbekannt') {
-        $meldung = 'Zu diesem Code haben wir keine Anfrage gefunden.';
-    }
-    ?>
-    <form class="rfat-after-booking" method="post" action="<?php echo esc_url(home_url('/termin-buchen/')); ?>">
-        <p class="rfat-ab-head">Möchtest du benachrichtigt werden?</p>
-        <p class="rfat-ab-text">
-            Trag hier freiwillig eine E-Mail ein, dann schreiben wir dir, sobald
-            der Termin bestätigt ist. Nötig ist sie nicht — dein Code genügt.
-        </p>
-
-        <?php wp_nonce_field('rfat_save_email', 'rfat_nonce'); ?>
-        <input type="hidden" name="rfat_code" value="<?php echo esc_attr($code); ?>">
-
-        <input type="email" name="rfat_email" class="rfat-ab-input"
-               placeholder="dein@beispiel.de (freiwillig)"
-               aria-label="E-Mail-Adresse, freiwillig">
-
-        <label class="rfat-ab-keep">
-            <input type="checkbox" name="rfat_keep" value="1">
-            <span>Adresse darf auch nach dem Termin gespeichert bleiben.
-                  Ohne Haken wird sie danach automatisch gelöscht.</span>
-        </label>
-
-        <?php if ($meldung !== ''): ?>
-            <p class="rfat-ab-hint"><?php echo esc_html($meldung); ?></p>
-        <?php endif; ?>
-
-        <div class="rfat-ab-row">
-            <button type="submit" name="rfat_save_email" value="1" class="rfat-ab-btn">E-Mail speichern und weiter</button>
-            <a class="rfat-ab-btn rfat-ab-ghost" href="<?php echo esc_url(home_url('/termin-abrufen/?code=' . rawurlencode($code))); ?>">Ohne E-Mail weiter</a>
-        </div>
-        <p class="rfat-ab-cal"><a href="<?php echo esc_url(add_query_arg('ics', $code, home_url('/termin-buchen/'))); ?>">&#128197; Zum Kalender hinzufügen</a></p>
-    </form>
-    <?php
-}
-
 /*
- * Das Formular von oben entgegennehmen. Läuft vor jeder Ausgabe, damit
- * anschließend weitergeleitet werden kann — sonst landet man beim
- * Neuladen wieder auf einem abgeschickten Formular.
+ * Hier stand das E-Mail-Feld fuer die Zwischenseite nach der Buchung.
+ * Seit die Buchung direkt auf /termin-abrufen/ fuehrt, gibt es die
+ * Zwischenseite nicht mehr — und dort steht dasselbe Feld ohnehin, mit
+ * Kalender-Knopf, Verschieben und Absagen daneben. Zwei Formulare fuer
+ * dieselbe Sache waren einmal zu viel.
  */
-add_action('template_redirect', function () {
-    if (empty($_POST['rfat_save_email'])) {
-        return;
-    }
-
-    $code = rfat_normalize_code(sanitize_text_field(wp_unslash($_POST['rfat_code'] ?? '')));
-    $back = add_query_arg('code', rawurlencode($code), home_url('/termin-buchen/'));
-
-    if (!isset($_POST['rfat_nonce']) || !wp_verify_nonce(wp_unslash($_POST['rfat_nonce']), 'rfat_save_email')) {
-        wp_safe_redirect(add_query_arg('rfat_mail', 'ungueltig', $back));
-        exit;
-    }
-
-    $email = sanitize_email(wp_unslash($_POST['rfat_email'] ?? ''));
-    if ($code === '' || !is_email($email)) {
-        wp_safe_redirect(add_query_arg('rfat_mail', 'ungueltig', $back));
-        exit;
-    }
-
-    $match = rfat_find_booking_by_code($code);
-    if (!$match) {
-        wp_safe_redirect(add_query_arg('rfat_mail', 'unbekannt', $back));
-        exit;
-    }
-
-    $post_id = $match['post']->ID;
-    update_post_meta($post_id, RFAT_EMAIL_META, $email);
-    if (!empty($_POST['rfat_keep'])) {
-        update_post_meta($post_id, RFAT_EMAIL_KEEP_META, '1');
-    } else {
-        delete_post_meta($post_id, RFAT_EMAIL_KEEP_META);
-    }
-
-    rfat_notify_email_added($post_id, $email);
-
-    wp_safe_redirect(home_url('/termin-abrufen/?code=' . rawurlencode($code)));
-    exit;
-}, 5);
 
 /**
  * Nachtrag an die Werkstatt, wenn kurz nach der Anfrage eine Adresse
@@ -3659,18 +3518,6 @@ if (!function_exists('rc_build_slots')) {
         return null;
     }
 
-    function rc_booking_by_code($code) {
-        $code = strtoupper(trim((string) $code));
-        if ($code === '') return null;
-        $q = get_posts(array(
-            'post_type'   => 'rc_booking',
-            'numberposts' => 1,
-            'post_status' => 'publish',
-            'meta_key'    => '_rc_code',
-            'meta_value'  => $code,
-        ));
-        return $q ? $q[0] : null;
-    }
 
     /**
      * Fehlermeldungen als feste Schluessel statt als Text in der Adresse:
@@ -3754,7 +3601,14 @@ if (!function_exists('rc_build_slots')) {
             exit;
         }
 
-        wp_safe_redirect(rc_booking_page_url(array('code' => $res['code'])));
+        /*
+         * Direkt in die Verwaltung statt auf eine Zwischenseite. Dort steht
+         * alles, was die Zwischenseite auch zeigte - Termin, Code, das
+         * freiwillige E-Mail-Feld, der Kalender-Knopf - und zusaetzlich
+         * laesst sich der Termin gleich verschieben oder absagen. Ein Klick
+         * weniger, und nichts geht verloren.
+         */
+        wp_safe_redirect(home_url('/termin-abrufen/?code=' . rawurlencode($res['code']) . '&neu=1'));
         exit;
     }, 5);
 
@@ -3765,7 +3619,20 @@ if (!function_exists('rc_build_slots')) {
     add_action('template_redirect', function () {
         if (!is_singular()) return;
         $content = (string) get_post_field('post_content', get_queried_object_id());
-        if (has_shortcode($content, 'repairffm_booking')) nocache_headers();
+        if (!has_shortcode($content, 'repairffm_booking')) return;
+
+        /*
+         * Aeltere Lesezeichen und der Zurueck-Knopf zeigen noch auf
+         * /termin-buchen/?code=... Ein Termin wird nur noch an einer
+         * Stelle angezeigt, also dorthin weiterleiten.
+         */
+        if (!empty($_GET['code'])) {
+            $code = sanitize_text_field(wp_unslash($_GET['code']));
+            wp_safe_redirect(home_url('/termin-abrufen/?code=' . rawurlencode($code)), 301);
+            exit;
+        }
+
+        nocache_headers();
     }, 6);
 
     /*
@@ -3788,9 +3655,6 @@ if (!function_exists('rc_build_slots')) {
     }, 5);
 
     add_shortcode('repairffm_booking', function () {
-
-        $code = isset($_GET['code']) ? sanitize_text_field(wp_unslash($_GET['code'])) : '';
-        if ($code !== '') return rc_step_done($code);
 
         $slot_id = isset($_GET['wann']) ? sanitize_text_field(wp_unslash($_GET['wann'])) : '';
         if ($slot_id !== '') {
@@ -3897,53 +3761,6 @@ if (!function_exists('rc_build_slots')) {
             <button type="submit" name="rc_book_submit" value="1" class="rc-btn">Termin anfragen</button>
             <p class="rc-hint">Der Termin ist damit vorgemerkt, aber noch nicht bestätigt. Wir sehen uns die Anfrage an und melden uns.</p>
           </form>
-        </div>
-        <?php return ob_get_clean();
-    }
-
-    function rc_step_done($code) {
-        $post = rc_booking_by_code($code);
-        if (!$post) {
-            ob_start(); ?>
-            <div class="rc-book">
-              <p class="rc-error">Zu diesem Code haben wir keine Anfrage gefunden. Möglicherweise ist der Termin schon vorbei und die Daten wurden gelöscht.</p>
-              <p><a class="rc-btn" href="<?php echo esc_url(rc_booking_page_url()); ?>">Neuen Termin wählen</a></p>
-            </div>
-            <?php return ob_get_clean();
-        }
-
-        $cats = rc_categories();
-        $cat  = get_post_meta($post->ID, '_rc_cat', true);
-        $date = get_post_meta($post->ID, '_rc_date', true);
-        $time = get_post_meta($post->ID, '_rc_time', true);
-        $when = '';
-        if ($date) {
-            $d = date_create($date);
-            if ($d) $when = rc_weekday_de($d->format('w')) . ', ' . $d->format('d.m.Y');
-        }
-
-        ob_start(); ?>
-        <div class="rc-book rc-done">
-          <div class="rc-ok" aria-hidden="true"></div>
-          <h2 class="rc-h">Termin vorgemerkt</h2>
-          <p class="rc-summary"><?php
-            $teile = array();
-            if (isset($cats[$cat])) $teile[] = $cats[$cat];
-            if ($when !== '')       $teile[] = $when . ($time ? ', ' . $time . ' Uhr' : '');
-            echo esc_html($teile ? implode(' — ', $teile) : 'Termin gespeichert');
-          ?></p>
-          <p>Dein Buchungscode: <strong class="rc-code"><?php echo esc_html(get_post_meta($post->ID, '_rc_code', true)); ?></strong></p>
-          <p class="rc-hint">Bitte warte noch auf unsere Bestätigung &ndash; erst dann steht dein Termin fest.
-            Notiere dir den Code oder mach einen Screenshot; damit kommst du jederzeit wieder an deinen Termin.</p>
-
-          <?php
-          /* Anknuepfpunkt fuer das Begleit-Plugin: dort haengt das freiwillige
-           * E-Mail-Feld und der Kalender-Knopf. Ist es nicht aktiv, steht hier
-           * einfach nichts - die Buchung ist trotzdem vollstaendig. */
-          do_action('repairffm_after_booking', get_post_meta($post->ID, '_rc_code', true), $post->ID);
-          ?>
-
-          <p class="rc-again"><a href="<?php echo esc_url(rc_booking_page_url()); ?>">Weiteren Termin anfragen</a></p>
         </div>
         <?php return ob_get_clean();
     }
