@@ -57,6 +57,10 @@ Zwei **Must-Use-Plugins** (`/wp-content/mu-plugins/`):
 > **Mit Claude Code und Dateizugriff ist das jetzt anders — der erste sinnvolle
 > Schritt ist, diesen Quellcode endlich zu lesen.** Mehrere unserer Workarounds
 > werden dadurch überflüssig (siehe Abschnitt 8).
+>
+> Wie man den Zugriff herstellt, steht in **`ZUGRIFF-MU-PLUGINS.md`** — samt
+> der bereits geprüften Sackgassen, damit sie niemand erneut abläuft. Die
+> Website läuft selbst gehostet auf einem **Umbrel-Server** (Docker).
 
 ### Datenmodell des Buchungs-Plugins (rekonstruiert)
 
