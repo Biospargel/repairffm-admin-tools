@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.9.3
+ * Version: 1.9.4
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1593,23 +1593,23 @@ add_action('wp_head', function () {
          * deckeln wir die Höhe und machen den Inhalt scrollbar — damit rückt
          * er von selbst in Reichweite.
          *
-         * Die Klassennamen stammen aus dem gerenderten HTML und sind NICHT
-         * durch Quellcode bestätigt. Greifen sie nicht, bleiben diese Regeln
-         * wirkungslos; die Diagnose unten sagt, welcher Fall vorliegt. */
+         * Die Klassen sind seit 21.08.2026 bestätigt: Die Diagnose meldete
+         * .rc-overlay, .rc-modal und — bis dahin unbekannt — .rc-close für
+         * den Schließen-Button. Es wird hier also nichts mehr geraten. */
         .rc-overlay {
             align-items: flex-start;
+            /*
+             * Gescrollt wird das Overlay, nicht der Dialog. Beim Dialog
+             * scrollte der Schließen-Button mit nach oben aus dem Bild —
+             * genau die Klage vom 21.08. Bleibt das Overlay der
+             * Scroll-Bereich, kann der Button darüber stehen bleiben.
+             */
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
             padding: max(16px, env(safe-area-inset-top)) 12px
                      max(16px, env(safe-area-inset-bottom));
         }
-        /* Nicht auf .rc-modal verlassen: Der Screenshot vom 21.08. zeigte den
-         * Dialog weiterhin unten abgeschnitten, die Klasse heißt also
-         * vermutlich anders. Über den direkten Kindselektor trifft die
-         * Begrenzung den Dialog unabhängig von seinem Namen. */
-        .rc-overlay > * {
-            max-height: 85vh;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
+        .rc-modal {
             box-sizing: border-box;
         }
 
@@ -1734,6 +1734,44 @@ add_action('wp_head', function () {
             padding-top: max(62px, env(safe-area-inset-top));
         }
 
+        /*
+         * Der Schließen-Button auf dem Handy.
+         *
+         * Ursprüngliche Klage: "kann ich nur sehr schwer schließen, weil der
+         * X-Button nicht gut erreichbar ist". Er stand klein am oberen Rand
+         * des Dialogs und rutschte beim Scrollen durch die Terminliste aus
+         * dem Bild. Fest am Fensterrand verankert bleibt er immer in
+         * Reichweite, unabhängig davon, wie weit man gescrollt hat.
+         *
+         * 46px sind mehr als die 44px, die Apple als kleinste sinnvolle
+         * Trefferfläche nennt.
+         */
+        @media (max-width: 600px) {
+            .rc-close {
+                position: fixed !important;
+                top: calc(12px + env(safe-area-inset-top));
+                right: 12px;
+                z-index: 10;
+                display: flex !important;
+                align-items: center;
+                justify-content: center;
+                width: 46px;
+                height: 46px;
+                padding: 0 !important;
+                margin: 0 !important;
+                border: 1px solid #cfd8d2 !important;
+                border-radius: 50% !important;
+                background: #fff !important;
+                color: #1c2a22 !important;
+                font-size: 24px !important;
+                line-height: 1 !important;
+                box-shadow: 0 2px 12px rgba(28, 42, 34, .22);
+            }
+            body.admin-bar .rc-close {
+                top: calc(58px + env(safe-area-inset-top));
+            }
+        }
+
         /* Ab sehr schmalen Screens: Aktions-Buttons stapeln statt quetschen */
         @media (max-width: 420px) {
             .rfat-pub-actions {
@@ -1755,7 +1793,17 @@ add_action('wp_head', function () {
 add_action('wp_footer', function () {
     // Die Diagnose-Box unten ist ein Werkzeug für uns, kein Seiteninhalt —
     // Besucher bekommen sie nie zu sehen.
-    $show_diag = current_user_can('manage_options') ? 'true' : 'false';
+    /*
+     * Die Diagnose-Box hat am 21.08.2026 geliefert, wonach zweimal geraten
+     * wurde: .rc-overlay, .rc-modal und .rc-close. Damit ist ihr Zweck
+     * erfüllt — sie legte sich aber über den Dialog und soll deshalb
+     * nicht mehr bei jedem Öffnen erscheinen.
+     *
+     * Sie bleibt erhalten, weil die nächste unbekannte Struktur bestimmt
+     * kommt: mit ?rfat_diag=1 an der Adresse ist sie wieder da.
+     */
+    $show_diag = (current_user_can('manage_options') && !empty($_GET['rfat_diag']))
+        ? 'true' : 'false';
     ?>
     <script id="rfat-btn-cleanup">
     window.rfatShowDiag = <?php echo $show_diag; ?>;
