@@ -31,6 +31,12 @@ Passwort, aber ein SHA-256-Hash mit fest eingebautem, bekanntem Salt.
 Beides zusammen laesst sich offline durchprobieren - in einem
 oeffentlichen Repo hat das nichts zu suchen.
 
+> **Seit Plugin 1.17.0 stillgelegt.** Die Datei muss dafuer nicht im Repo
+> liegen: Das Begleit-Plugin benennt sie auf dem Server in
+> `repairffm-gate.php.deaktiviert` um und haengt ihre Haken aus. Zum
+> Zurueckholen der geschlossenen Phase genuegt der alte Dateiname.
+> Wie das funktioniert, steht in `HANDOFF.md`, Abschnitt 7.
+
 ## Was daraus folgt
 
 | Meta-Key | Inhalt |

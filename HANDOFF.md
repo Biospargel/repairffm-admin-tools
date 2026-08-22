@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 21.08.2026 · Plugin-Version 1.16.0
+Stand: 22.08.2026 · Plugin-Version 1.17.0
 
 ---
 
@@ -18,7 +18,7 @@ Stand: 21.08.2026 · Plugin-Version 1.16.0
 | WordPress | 7.0.4 |
 | Theme | „Repair FFM (Block)" – ein **Block-Theme** (Full Site Editing) |
 | Zeitzone | Europe/Berlin (wichtig, siehe Abschnitt 6) |
-| Status | Noch nicht öffentlich – Kennwortschutz-Gate aktiv |
+| Status | Kennwortsperre entfernt (Plugin 1.17.0) – Seite ohne Kennwort erreichbar |
 | Hosting | Selbst gehostet (nicht WordPress.com), Jetpack verbunden (Free-Plan) |
 
 ### Leitprinzip: Datensparsamkeit
@@ -46,9 +46,11 @@ Zwei **Must-Use-Plugins** (`/wp-content/mu-plugins/`):
 
 1. **Repair FFM – Core (Buchung & Seiten)** v1.0
    Die eigentliche Buchungslogik + Grundseiten.
-2. **Repair FFM – Kennwortschutz (WordPress)** v1.0
-   Kennwort-Gate für die geschlossene Phase. Blockiert *nicht* admin-ajax
-   (Buchung), wp-admin oder Login.
+2. **Repair FFM – Kennwortschutz (WordPress)** v1.0 — *seit 1.17.0 stillgelegt*
+   Kennwort-Gate für die geschlossene Phase. Blockierte *nicht* admin-ajax
+   (Buchung), wp-admin oder Login. Das Plugin benennt die Datei in
+   `repairffm-gate.php.deaktiviert` um; zum Zurückholen genügt der alte
+   Name (siehe Abschnitt 7, „Kennwortsperre raus").
 
 > ⚠️ **Wichtige Einschränkung:** Must-Use-Plugins sind über den WordPress-
 > Plugin-Editor **nicht bearbeitbar**. Der Quellcode des Buchungs-Plugins war
@@ -317,6 +319,7 @@ Versionssprung zum ersten Mal.
 | 1.14.1 | Balken hinter dem Hamburger entfernt (schnitt beim Scrollen durch den Text); Versatz für die Adminleiste richtiggestellt |
 | 1.15.0 | Weniger Datenbank-Zugriffe (Meta-Batching, zwei kurze Caches); CSS wird **beim Ausliefern** gestrichen statt in der Quelle |
 | 1.16.0 | Buchung führt **direkt** auf `/termin-abrufen/` — Zwischenseite und zweites E-Mail-Formular entfallen (183 Zeilen weniger) |
+| 1.17.0 | **Kennwortsperre entfernt** — das Gate-mu-Plugin wird stillgelegt, obwohl seine Datei nicht im Repo liegt; Cookie-Absatz im Datenschutz richtiggestellt |
 
 ---
 
@@ -336,6 +339,7 @@ Versionssprung zum ersten Mal.
 - ✅ Benachrichtigung bei neuer Anfrage, mit Zusagen-/Absagen-Links
 - ✅ Zusage-Schritt: Termine sind erst nach Bestätigung verbindlich
 - ✅ Kalendereintrag und Selbstverwaltungs-Link nach der Buchung
+- ✅ Kennwortsperre entfernt (1.17.0) — ohne Serverzugriff, aus dem Plugin heraus
 
 ---
 
@@ -467,10 +471,56 @@ Datenschutzerklärung.
 
 - Customizer → Zusätzliches CSS enthält noch die alten `.btn`-Regeln.
   Seit 1.3.0 redundant, kann gelöscht werden.
-- Kennwortschutz ist noch aktiv — vor dem Livegang deaktivieren.
-- Suchmaschinen-Sichtbarkeit prüfen (Einstellungen → Lesen).
+- ~~Kennwortschutz ist noch aktiv~~ — erledigt in 1.17.0.
+- Suchmaschinen-Sichtbarkeit prüfen (Einstellungen → Lesen). Das Plugin
+  sagt im Hinweis nach dem Entsperren, wie der Haken gerade steht — setzen
+  muss ihn jemand von Hand, das ist keine Entscheidung fürs Plugin.
 - Startseite, Datenschutz und Impressum müssen vor dem Livegang stehen;
   fertige Texte lagen dem Betreiber am 21.08.2026 vor.
+
+### Kennwortsperre raus — erledigt in 1.17.0
+
+Die Sperre steckte in `/wp-content/mu-plugins/repairffm-gate.php`. Diese
+Datei liegt **absichtlich nicht im Repository** (sie enthält den
+Kennwort-Hash), mu-Plugins lassen sich weder im Plugin-Editor bearbeiten
+noch unter „Plugins" abschalten, und `biospargel.org` ist aus der
+Cloud-Sandbox nicht erreichbar. Von außen führte also kein Weg hin.
+
+Von innen schon: Das Begleit-Plugin läuft auf demselben Server, im selben
+PHP-Prozess, und wird **nach** den mu-Plugins geladen. Der Abschnitt
+`KENNWORTSPERRE ENTFERNEN` tut deshalb zweierlei:
+
+1. **Datei stilllegen.** Einmalig `rename()` auf
+   `repairffm-gate.php.deaktiviert`. WordPress lädt aus `mu-plugins` nur
+   `*.php` — ab dem nächsten Aufruf ist die Sperre weg. Umbenannt statt
+   gelöscht: Wer die geschlossene Phase zurückholen will, benennt zurück.
+2. **Haken lösen.** Für den laufenden Aufruf ist das Umbenennen zu spät,
+   da hängen die Haken des Gates schon. Also werden alle Rückrufe entfernt,
+   deren Datei laut Reflection die Gate-Datei ist — an rund fünfzehn Haken,
+   an denen eine Zugangssperre überhaupt hängen kann. Wie die Funktionen
+   des Gates heißen, muss dafür niemand wissen.
+
+**Erkannt wird am Verhalten, nicht am Dateinamen:** Als Gate gilt eine
+Datei, die `rc_access` aus `$_COOKIE` liest — oder deren Plugin-Kopf
+„Kennwortschutz" heißt. Der Buchungs-Kern nennt denselben Cookie zwar im
+Datenschutztext, liest ihn nicht, und wird an `rc_build_slots` erkannt und
+in jedem Fall in Ruhe gelassen.
+
+Geht das Umbenennen nicht (Dateisystem schreibgeschützt), bleibt es beim
+Aushängen der Haken — offen ist die Seite dann trotzdem, aber bei jedem
+Aufruf neu. Ein Hinweis im Verwaltungsbereich nennt dann den `mv`-Befehl
+für den Server.
+
+**Was sich am Datenschutztext ändert:** Der Cookie-Absatz beschrieb den
+`rc_access`-Cookie der geschlossenen Phase. Ohne Sperre stimmt das nicht
+mehr, deshalb ersetzt das Plugin **genau diesen einen Absatz** auf der
+Seite `/datenschutz/`. Nicht über `rc_setup_version` — das Hochzählen
+schreibt alle fünf Seiten neu und würde eigene Änderungen im Seiteneditor
+mitnehmen.
+
+Nicht angefasst, weil es keine Plugin-Entscheidung ist: der Haken
+*Einstellungen → Lesen → Suchmaschinen abhalten*. Wie er steht, steht im
+Hinweis nach dem Entsperren.
 
 ### Buchung als echte Seite — erledigt in 1.11.0
 
@@ -895,7 +945,8 @@ Admin-Seite:    edit.php?post_type=rc_booking&page=rfat-overview
 Transients:     rfat_github_release (6 h), rfat_menu_items (12 h),
                 rfat_status (5 min), rfat_cleanup_ran (24 h)
 Meta (unseres): _rfat_status, _rfat_email, _rfat_email_keep, _rfat_notified
-Optionen:       rfat_notify_to, rfat_notify_log, rfat_release_log
+Optionen:       rfat_notify_to, rfat_notify_log, rfat_release_log,
+                rfat_gate_entfernt, rfat_gate_hinweis, rfat_gate_datenschutz
 Status:         angefragt, bestaetigt, offen, erledigt, storniert
 Handy-Menü:     .rfat-nav-open, .rfat-nav-overlay, .rfat-nav-link
 Nach Buchung:   #rfat-after-booking (in den fremden Dialog eingehängt)
