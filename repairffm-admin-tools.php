@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.16.0
+ * Version: 1.17.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -3353,6 +3353,321 @@ add_action('load-update-core.php', function () {
 });
 
 /* =========================================================================
+ * KENNWORTSPERRE ENTFERNEN
+ *
+ * Die geschlossene Phase ist vorbei — die Seite soll ohne Kennwort
+ * erreichbar sein.
+ *
+ * Die Sperre steckt nicht in dieser Datei, sondern in einem eigenen
+ * Must-Use-Plugin auf dem Server:
+ * `/wp-content/mu-plugins/repairffm-gate.php` („Repair FFM –
+ * Kennwortschutz"). Must-Use-Plugins lassen sich weder im Plugin-Editor
+ * bearbeiten noch unter „Plugins" abschalten, und die Datei liegt
+ * absichtlich nicht im Repository (sie enthält den Kennwort-Hash). Von
+ * außen war an sie deshalb nie heranzukommen.
+ *
+ * Von hier aus schon: Dieses Plugin läuft auf demselben Server, im selben
+ * PHP-Prozess, und wird nach den mu-Plugins geladen. Es tut zweierlei:
+ *
+ *   1. Es benennt die Gate-Datei einmalig in `*.php.deaktiviert` um.
+ *      WordPress lädt aus dem mu-plugins-Verzeichnis nur `*.php` —
+ *      ab dem nächsten Seitenaufruf ist die Sperre damit weg.
+ *      Umbenannt und nicht gelöscht: Wer die geschlossene Phase
+ *      zurückholen will, benennt die Datei zurück, fertig.
+ *
+ *   2. Für den laufenden Aufruf kommt das zu spät — da ist die Datei
+ *      längst geladen und ihre Haken hängen. Deshalb werden zusätzlich
+ *      alle Haken entfernt, deren Rückruf aus dieser Datei stammt.
+ *      Wie die heißen, muss niemand wissen: Reflection verrät zu jedem
+ *      Rückruf, in welcher Datei er steht.
+ *
+ * Erkannt wird die Sperre nicht am Dateinamen, sondern am Verhalten: Als
+ * Gate gilt eine Datei, die den Zugangs-Cookie `rc_access` aus `$_COOKIE`
+ * liest — oder die sich im Plugin-Kopf „Kennwortschutz" nennt. Die
+ * Buchung nennt denselben Cookie zwar im Datenschutztext, liest ihn aber
+ * nicht; sie wird an ihrer Funktion `rc_build_slots` erkannt und in jedem
+ * Fall in Ruhe gelassen.
+ *
+ * Schlägt das Umbenennen fehl (Dateisystem schreibgeschützt), bleibt es
+ * beim Aushängen der Haken — die Sperre ist dann trotzdem weg, aber bei
+ * jedem Aufruf neu. Ein Hinweis im Verwaltungsbereich nennt in dem Fall
+ * den Befehl für den Server.
+ * ========================================================================= */
+
+define('RFAT_GATE_LOG',    'rfat_gate_entfernt');
+define('RFAT_GATE_NOTICE', 'rfat_gate_hinweis');
+define('RFAT_GATE_TEXT',   'rfat_gate_datenschutz');
+
+/*
+ * Der Cookie-Absatz der Datenschutzerklaerung — an genau einer Stelle.
+ * Er steht sowohl in der Einrichtung der Seiten (Abschnitt TERMINBUCHUNG,
+ * Punkt 6) als auch in der Richtigstellung weiter unten; zwei Fassungen
+ * davon waeren zwei Fassungen zu viel.
+ */
+define('RFAT_COOKIE_ABSATZ', '<p>Diese Website setzt für Besucher:innen keine eigenen Cookies. Für Team-Mitglieder setzt WordPress beim Login in den Verwaltungsbereich technisch notwendige Cookies. Zum technisch notwendigen Cookie des vorgelagerten Dienstes siehe den Abschnitt „Auslieferung über Cloudflare (CDN)". Rechtsgrundlage: § 25 Abs. 2 TDDDG i. V. m. Art. 6 Abs. 1 lit. f DSGVO.</p>');
+
+/**
+ * Die Datei(en) der Kennwortsperre im mu-plugins-Verzeichnis finden.
+ *
+ * @return string[] Absolute Pfade.
+ */
+function rfat_gate_dateien() {
+    static $gefunden = null;
+    if (is_array($gefunden)) {
+        return $gefunden;
+    }
+    $gefunden = [];
+
+    if (!defined('WPMU_PLUGIN_DIR') || !is_dir(WPMU_PLUGIN_DIR)) {
+        return $gefunden;
+    }
+
+    foreach ((array) glob(WPMU_PLUGIN_DIR . '/*.php') as $datei) {
+        $inhalt = @file_get_contents($datei, false, null, 0, 256 * 1024);
+        if (!is_string($inhalt) || $inhalt === '') {
+            continue;
+        }
+        // Die Buchung bleibt unangetastet, auch wenn sie rc_access nennt.
+        if (strpos($inhalt, 'rc_build_slots') !== false) {
+            continue;
+        }
+        $liest_cookie = strpos($inhalt, 'rc_access') !== false && strpos($inhalt, '_COOKIE') !== false;
+        $heisst_so    = (bool) preg_match('/^[ \t\/*#@]*Plugin Name:.*Kennwortschutz/mi', $inhalt);
+        if (!$liest_cookie && !$heisst_so) {
+            continue;
+        }
+        $pfad = realpath($datei);
+        $gefunden[] = $pfad ? $pfad : $datei;
+    }
+
+    return $gefunden;
+}
+
+/**
+ * In welcher Datei steht dieser Rückruf?
+ *
+ * @param mixed $rueckruf Callback aus $wp_filter.
+ * @return string Absoluter Pfad oder '' (unbekannt, z. B. interne Funktion).
+ */
+function rfat_gate_rueckruf_datei($rueckruf) {
+    try {
+        if (is_string($rueckruf) && strpos($rueckruf, '::') !== false) {
+            $rueckruf = explode('::', $rueckruf);
+        }
+
+        if ($rueckruf instanceof Closure || (is_string($rueckruf) && function_exists($rueckruf))) {
+            $spiegel = new ReflectionFunction($rueckruf);
+        } elseif (is_array($rueckruf) && count($rueckruf) === 2) {
+            $spiegel = new ReflectionMethod($rueckruf[0], $rueckruf[1]);
+        } elseif (is_object($rueckruf) && method_exists($rueckruf, '__invoke')) {
+            $spiegel = new ReflectionMethod($rueckruf, '__invoke');
+        } else {
+            return '';
+        }
+    } catch (Throwable $e) {
+        return '';
+    }
+
+    $datei = $spiegel->getFileName();
+    if (!$datei) {
+        return '';
+    }
+    $echt = realpath($datei);
+
+    return $echt ? $echt : $datei;
+}
+
+/**
+ * Alle Haken abhängen, die aus den übergebenen Dateien stammen.
+ *
+ * Nur die Haken, an denen eine Zugangssperre überhaupt hängen kann —
+ * einmal durch den kompletten $wp_filter zu laufen wäre auf jeder Seite
+ * spürbar und für nichts.
+ *
+ * @param string[] $dateien
+ * @return int Anzahl entfernter Haken.
+ */
+function rfat_gate_haken_loesen(array $dateien) {
+    if (!$dateien || empty($GLOBALS['wp_filter'])) {
+        return 0;
+    }
+
+    $haken = [
+        'muplugins_loaded', 'plugins_loaded', 'setup_theme', 'after_setup_theme',
+        'init', 'wp_loaded', 'parse_request', 'send_headers', 'wp',
+        'template_redirect', 'template_include', 'get_header', 'wp_head',
+        'posts_results', 'the_content', 'login_init', 'admin_init',
+    ];
+
+    $entfernt = 0;
+
+    foreach ($haken as $name) {
+        if (!isset($GLOBALS['wp_filter'][$name])) {
+            continue;
+        }
+        $hook = $GLOBALS['wp_filter'][$name];
+        if (!($hook instanceof WP_Hook)) {
+            continue;
+        }
+
+        // Erst sammeln, dann entfernen — sonst wird die Liste unter der
+        // laufenden Schleife verändert.
+        $weg = [];
+        foreach ($hook->callbacks as $prio => $eintraege) {
+            foreach ($eintraege as $eintrag) {
+                if (!isset($eintrag['function'])) {
+                    continue;
+                }
+                $datei = rfat_gate_rueckruf_datei($eintrag['function']);
+                if ($datei !== '' && in_array($datei, $dateien, true)) {
+                    $weg[] = [$prio, $eintrag['function']];
+                }
+            }
+        }
+
+        foreach ($weg as $treffer) {
+            remove_filter($name, $treffer[1], $treffer[0]);
+            $entfernt++;
+        }
+    }
+
+    return $entfernt;
+}
+
+/**
+ * Kennwortsperre abschalten: Haken lösen, Datei stilllegen.
+ *
+ * Läuft vor `init` und `template_redirect` — dort greift eine Sperre
+ * üblicherweise zu.
+ */
+function rfat_kennwortsperre_entfernen() {
+    $log = get_option(RFAT_GATE_LOG);
+
+    /*
+     * Erledigt ist erledigt: kein glob(), kein Lesen, nichts. Nur wenn
+     * eine Datei liegen geblieben ist (Umbenennen ging nicht), wird bei
+     * jedem Aufruf weitergearbeitet.
+     */
+    if (is_array($log) && empty($log['offen'])) {
+        return;
+    }
+
+    $dateien = rfat_gate_dateien();
+    if (!$dateien) {
+        if (!is_array($log)) {
+            update_option(RFAT_GATE_LOG, ['zeit' => time(), 'erledigt' => [], 'offen' => []], true);
+        }
+        return;
+    }
+
+    rfat_gate_haken_loesen($dateien);
+
+    $erledigt = (is_array($log) && !empty($log['erledigt'])) ? (array) $log['erledigt'] : [];
+    $offen    = [];
+
+    foreach ($dateien as $datei) {
+        $ziel = $datei . '.deaktiviert';
+        if (file_exists($ziel)) {
+            $ziel = $datei . '.deaktiviert-' . gmdate('Ymd-His');
+        }
+        if (@rename($datei, $ziel)) {
+            $erledigt[] = $ziel;
+        } else {
+            $offen[] = $datei;
+        }
+    }
+
+    update_option(RFAT_GATE_LOG, [
+        'zeit'     => time(),
+        'erledigt' => $erledigt,
+        'offen'    => $offen,
+    ], true);
+
+    if ($erledigt && !$offen) {
+        update_option(RFAT_GATE_NOTICE, '1', false);
+    }
+}
+add_action('plugins_loaded', 'rfat_kennwortsperre_entfernen', 0);
+
+/**
+ * Der Cookie-Absatz der Datenschutzerklärung stimmt ohne Sperre nicht mehr.
+ *
+ * Ersetzt wird genau dieser eine Absatz, nicht die ganze Seite: Für die
+ * übrigen Texte gilt weiterhin, dass eigene Änderungen im Seiteneditor
+ * nicht überschrieben werden (anders als beim Hochzählen von
+ * `rc_setup_version`, das alle fünf Seiten neu schreibt).
+ */
+function rfat_datenschutz_cookie_absatz() {
+    $seite = get_page_by_path('datenschutz');
+    if (!$seite) {
+        return false;
+    }
+
+    $alt = (string) $seite->post_content;
+    $pos = strpos($alt, 'geschlossenen Phase');
+    if ($pos === false) {
+        return false;
+    }
+
+    $start = strrpos(substr($alt, 0, $pos), '<p>');
+    $ende  = strpos($alt, '</p>', $pos);
+    if ($start === false || $ende === false) {
+        return false;
+    }
+
+    $neu = substr($alt, 0, $start) . RFAT_COOKIE_ABSATZ . substr($alt, $ende + 4);
+    wp_update_post(['ID' => $seite->ID, 'post_content' => $neu]);
+
+    return true;
+}
+
+add_action('init', function () {
+    if (get_option(RFAT_GATE_TEXT) === '1') {
+        return;
+    }
+    $log = get_option(RFAT_GATE_LOG);
+    if (!is_array($log) || empty($log['erledigt'])) {
+        return;
+    }
+    rfat_datenschutz_cookie_absatz();
+    update_option(RFAT_GATE_TEXT, '1', false);
+}, 30);
+
+add_action('admin_notices', function () {
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
+    $log = get_option(RFAT_GATE_LOG);
+
+    // Datei liegt noch da und ließ sich nicht umbenennen: Das gehört gesagt,
+    // sonst hängt die Sperre bei jedem Aufruf neu am seidenen Faden.
+    if (is_array($log) && !empty($log['offen'])) {
+        echo '<div class="notice notice-warning"><p><strong>Kennwortsperre:</strong> '
+            . 'Die Sperre ist abgeschaltet, die Datei liegt aber noch auf dem Server und '
+            . 'ließ sich nicht umbenennen (Schreibrechte). Auf dem Server erledigt das:</p>'
+            . '<p><code>mv ' . esc_html($log['offen'][0]) . ' ' . esc_html($log['offen'][0]) . '.deaktiviert</code></p></div>';
+        return;
+    }
+
+    if (get_option(RFAT_GATE_NOTICE) !== '1') {
+        return;
+    }
+    delete_option(RFAT_GATE_NOTICE);
+
+    $datei = (is_array($log) && !empty($log['erledigt'])) ? (string) end($log['erledigt']) : '';
+
+    echo '<div class="notice notice-success is-dismissible"><p><strong>Kennwortsperre entfernt.</strong> '
+        . 'Die Seite ist ohne Kennwort erreichbar.'
+        . ($datei !== '' ? ' Die Sperr-Datei liegt als <code>' . esc_html($datei) . '</code> daneben — '
+            . 'zum Zurückholen der geschlossenen Phase auf den alten Namen zurückbenennen.' : '')
+        . '</p><p>Vor dem Bekanntmachen der Adresse noch prüfen: '
+        . '<em>Einstellungen → Lesen</em> — „Suchmaschinen davon abhalten, diese Website zu indexieren" '
+        . (get_option('blog_public') ? 'ist aus. ' : '<strong>ist noch gesetzt.</strong> ')
+        . 'Impressum, Datenschutz und Startseite auf Aktualität ansehen.</p></div>';
+});
+
+/* =========================================================================
  * TERMINBUCHUNG
  *
  * Diese Funktionen lagen bis 1.11.0 in einem mu-Plugin
@@ -3900,7 +4215,7 @@ if (!function_exists('rc_build_slots')) {
     <p><strong>Widerruf:</strong> Du kannst deine Einwilligung jederzeit und ohne Angabe von Gründen widerrufen. Rufe dazu deinen Termin unter <a href="/termin-abrufen/">Termin abrufen</a> mit deinem Buchungscode auf, leere das E-Mail-Feld und speichere; alternativ nutzt du den Abmeldelink in jeder Nachricht. Die Rechtmäßigkeit der bis zum Widerruf erfolgten Verarbeitung bleibt unberührt.</p>
     <p><strong>Empfänger:</strong> Die Adresse wird nicht an Dritte weitergegeben und nicht für Werbung verwendet. Für den Versand der Nachrichten setzen wir einen E-Mail-Dienstleister als Auftragsverarbeiter ein; dieser wird hier benannt, sobald er eingerichtet ist.</p>
     <h2>Cookies</h2>
-    <p>Während der geschlossenen Phase setzt der Kennwortschutz einen technisch notwendigen Cookie (<code>rc_access</code>), der nur merkt, dass das Zugangskennwort korrekt eingegeben wurde (Laufzeit rund 30 Tage, kein Tracking). Für Team-Mitglieder setzt WordPress beim Login in den Verwaltungsbereich technisch notwendige Cookies. Für normale Besucher:innen werden darüber hinaus keine Cookies gesetzt. Rechtsgrundlage: § 25 Abs. 2 TDDDG i. V. m. Art. 6 Abs. 1 lit. f DSGVO.</p>
+    <!--RFAT_COOKIES-->
     <h2>Server-Protokolle</h2>
     <p>Beim Aufruf verarbeitet der Betrieb technisch bedingt Zugriffsdaten (IP-Adresse, Datum/Uhrzeit, aufgerufene Seite, Datenmenge, Browsertyp). Diese dienen ausschließlich dem sicheren, stabilen Betrieb und der Abwehr von Angriffen (Art. 6 Abs. 1 lit. f DSGVO) und werden nur kurz gespeichert.</p>
     <h2>Auslieferung über Cloudflare (CDN)</h2>
@@ -3911,6 +4226,9 @@ if (!function_exists('rc_build_slots')) {
     <p>Wende dich an die im <a href="/impressum/">Impressum</a> genannte Stelle.</p>
     <p><em>Stand: August 2026.</em></p>
     RCHTML;
+
+        // Cookie-Absatz aus einer Hand — siehe Abschnitt KENNWORTSPERRE ENTFERNEN.
+        $dsg = str_replace('<!--RFAT_COOKIES-->', RFAT_COOKIE_ABSATZ, $dsg);
 
         $pages = array(
             'termin-buchen' => array('Termin buchen',
