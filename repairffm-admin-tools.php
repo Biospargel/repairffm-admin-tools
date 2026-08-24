@@ -3765,8 +3765,12 @@ function rfat_haltung_text() {
 <p>Wer andere herabsetzt, bedroht oder ausgrenzt, wird gebeten zu gehen. Das entscheidet das Team vor Ort.</p>
 <h2>Wenn dir etwas passiert</h2>
 <p>Sprich jemanden aus dem Team an &ndash; direkt vor Ort oder später per E-Mail an <a href="mailto:repair.ffm@outlook.com">repair.ffm@outlook.com</a>. Wir hören zu und kümmern uns darum. Was daraus wird, entscheidest du mit.</p>
-<h2>Warum das hier steht</h2>
-<p>&bdquo;Reparieren statt Wegwerfen&ldquo; heißt: Dinge sind nicht wertlos, bloß weil sie kaputt sind. Für Menschen gilt das erst recht.</p>
+<h2>Antifaschismus ist Handarbeit</h2>
+<p>Wir sind eine Werkstatt und kein Bündnis &ndash; aber neutral sind wir nicht. Faschismus fängt nicht mit Fackelzügen an, sondern mit dem Spruch, der stehen bleibt, weil niemand widerspricht. Bei uns bleibt er nicht stehen: Wir widersprechen, und wir stellen uns vor die, die gemeint sind.</p>
+<p>Kein Fußbreit den Faschisten &ndash; auch nicht im Kleinen, auch nicht an unseren Tischen.</p>
+<h2>Free all Antifas</h2>
+<p>Wer sich Nazis in den Weg stellt, steht dafür in Europa vor Gericht, manche sitzen in Haft. Unsere Solidarität gehört ihnen. Antifaschismus ist kein Verbrechen &ndash; er ist die Bedingung dafür, dass Orte wie dieser überhaupt bestehen können.</p>
+<p>Solidarisch sein kostet wenig: hinschauen, widersprechen, Prozesse besuchen, für Anwaltskosten sammeln. Wer damit anfangen will, spricht uns beim nächsten Termin an.</p>
 RCHTML;
 }
 

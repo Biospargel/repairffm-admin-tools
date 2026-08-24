@@ -333,7 +333,7 @@ Versionssprung zum ersten Mal.
 | 1.16.0 | Buchung führt **direkt** auf `/termin-abrufen/` — Zwischenseite und zweites E-Mail-Formular entfallen (183 Zeilen weniger) |
 | 1.17.0 | **Kennwortsperre entfernt** — das Gate-mu-Plugin wird stillgelegt, obwohl seine Datei nicht im Repo liegt; Cookie-Absatz im Datenschutz richtiggestellt |
 | 1.17.1 | **Seitenrand auf dem Handy zurück** (ging in 1.14.0 verloren); lange Komposita in Überschriften brechen um |
-| 1.18.0 | Seite **„Haltung"** — alle willkommen, kein Platz für Rassismus, Queer-/Transfeindlichkeit und Faschismus; WordPress-Beispielseite in den Papierkorb |
+| 1.18.0 | Seite **„Haltung"** — alle willkommen, kein Platz für Rassismus, Queer-/Transfeindlichkeit und Faschismus, antifaschistische Solidarität; WordPress-Beispielseite in den Papierkorb |
 
 ---
 
@@ -502,7 +502,12 @@ Datenschutzerklärung.
 Eine eigene Seite unter `/haltung/`: dass alle willkommen sind, was hier
 keinen Platz hat (Rassismus, Antisemitismus, antimuslimischer Rassismus,
 Sexismus, Queer- und Transfeindlichkeit, Behindertenfeindlichkeit,
-Faschismus), und an wen man sich wendet, wenn doch etwas passiert.
+Faschismus), an wen man sich wendet, wenn doch etwas passiert — und zum
+Schluss zwei Abschnitte, die die Seite ausdrücklich antifaschistisch
+verorten („Antifaschismus ist Handarbeit", „Free all Antifas"): Solidarität
+mit denen, die deswegen vor Gericht stehen, samt der Wege, selbst
+solidarisch zu werden. Ausdrücklich so gewollt vom Betreiber (24.08.2026);
+die Seite ist damit ein politisches Statement und kein Hausordnungstext.
 
 **Die Zusage bleibt allgemein — ohne Aufzählung.** „Wir fragen nicht, wer
 du bist, woher du kommst oder wen du liebst" statt einer Liste von
