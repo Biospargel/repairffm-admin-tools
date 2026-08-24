@@ -3757,8 +3757,8 @@ define('RFAT_HALTUNG_OPTION', 'rfat_haltung_seite');
 function rfat_haltung_text() {
     return <<<'RCHTML'
 <p>Reparieren ist für alle da. Damit du weißt, worauf du dich einlässt, steht hier, wie wir es halten.</p>
-<h2>Willkommen ist, wer sein Gerät retten will</h2>
-<p>Unabhängig von Herkunft, Hautfarbe, Staatsangehörigkeit, Religion, Geschlecht, geschlechtlicher Identität, sexueller Orientierung, Alter, Behinderung, Sprache oder Geldbeutel. Lesbische, schwule, bisexuelle, trans, inter, nicht-binäre und queere Menschen sind hier ausdrücklich willkommen &ndash; wir sprechen dich mit dem Namen und den Pronomen an, die du uns nennst.</p>
+<h2>Alle sind willkommen</h2>
+<p>Wer sein Gerät retten will, ist hier richtig &ndash; ohne Wenn und Aber. Wir fragen nicht, wer du bist, woher du kommst oder wen du liebst. Wir sprechen dich mit dem Namen und den Pronomen an, die du uns nennst.</p>
 <p>Erzählen musst du dafür nichts. Wir fragen nur, was für die Reparatur nötig ist &ndash; und auch das so sparsam wie möglich, siehe <a href="/datenschutz/">Datenschutz</a>.</p>
 <h2>Wogegen wir stehen</h2>
 <p>Rassismus, Antisemitismus, antimuslimischer Rassismus, Sexismus, Queer- und Transfeindlichkeit, Behindertenfeindlichkeit und jede Form von Faschismus haben an unseren Tischen keinen Platz. Das ist keine Meinung neben anderen, sondern die Bedingung dafür, dass hier alle ohne Sorge sitzen können.</p>
@@ -3792,6 +3792,46 @@ function rfat_haltung_seite_anlegen() {
     return is_wp_error($id) ? 0 : (int) $id;
 }
 
+/* -------------------------------------------------------------------------
+ * Die WordPress-Beispielseite wegraeumen
+ *
+ * „Beispiel-Seite" stand im Menue zwischen den echten Seiten — die Vorlage,
+ * die WordPress bei der Installation anlegt. Sie ist Top-Level und
+ * veroeffentlicht, und genau daraus baut sich unser Menue.
+ *
+ * In den Papierkorb, nicht endgueltig geloescht, und nur solange der Text
+ * der unveraenderte Auslieferungszustand ist: Wer die Seite selbst
+ * beschrieben hat, meint sie auch so. Beides zusammen macht den Schritt
+ * ungefaehrlich — im Zweifel passiert nichts, und was passiert, laesst sich
+ * mit einem Klick zuruecknehmen.
+ * ----------------------------------------------------------------------- */
+
+define('RFAT_BEISPIEL_OPTION', 'rfat_beispielseite');
+
+/**
+ * @return int Seiten-ID der weggeraeumten Seite, sonst 0.
+ */
+function rfat_beispielseite_wegraeumen() {
+    foreach (['beispiel-seite', 'sample-page'] as $slug) {
+        $seite = get_page_by_path($slug);
+        if (!$seite || $seite->post_status === 'trash') {
+            continue;
+        }
+
+        $unberuehrt = stripos($seite->post_content, 'Dies ist eine Beispiel-Seite') !== false
+            || stripos($seite->post_content, 'This is an example page') !== false;
+        if (!$unberuehrt) {
+            continue;
+        }
+
+        wp_trash_post($seite->ID);
+
+        return (int) $seite->ID;
+    }
+
+    return 0;
+}
+
 add_action('init', function () {
     if (get_option(RFAT_HALTUNG_OPTION) !== false) {
         return;
@@ -3809,6 +3849,26 @@ add_action('init', function () {
     // Damit der Menüpunkt sofort dasteht und nicht erst in zwölf Stunden.
     delete_transient('rfat_menu_items');
 }, 30);
+
+add_action('init', function () {
+    if (get_option(RFAT_BEISPIEL_OPTION) !== false) {
+        return;
+    }
+
+    $id = rfat_beispielseite_wegraeumen();
+
+    /*
+     * Anders als beim Anlegen der Haltungs-Seite wird auch die 0 gemerkt:
+     * "nachgesehen, nichts zu tun" ist hier ein gueltiges Ergebnis. Sonst
+     * liefe die Suche bei jedem Aufruf erneut, obwohl es die Seite nie gab
+     * oder jemand sie selbst beschrieben hat.
+     */
+    update_option(RFAT_BEISPIEL_OPTION, $id, false);
+
+    if ($id) {
+        delete_transient('rfat_menu_items');
+    }
+}, 31);
 
 /* =========================================================================
  * TERMINBUCHUNG
