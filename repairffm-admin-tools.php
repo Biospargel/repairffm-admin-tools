@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.17.1
+ * Version: 1.18.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -3726,6 +3726,155 @@ add_action('admin_notices', function () {
 });
 
 /* =========================================================================
+ * HALTUNG
+ *
+ * Eine eigene Seite, auf der steht, für wen die Werkstatt offen ist und
+ * was hier keinen Platz hat.
+ *
+ * Angelegt wird sie einmalig und **zusätzlich** — nicht über
+ * `rc_setup_version`. Das Hochzählen schreibt alle Seiten neu und nimmt
+ * eigene Änderungen im Seiteneditor mit; für eine Seite, die es vorher
+ * nicht gab, wäre das ein hoher Preis. Existiert unter dem Namen schon
+ * eine Seite, bleibt sie unangetastet: Ein einmal angelegter Text gehört
+ * dem Betreiber, nicht dem Plugin.
+ *
+ * Ins Menü kommt sie von selbst. `rfat_menu_items_from_pages()` nimmt
+ * veröffentlichte Top-Level-Seiten in der Reihenfolge `menu_order,
+ * post_title` — deshalb hier nur anlegen und den Menü-Cache verwerfen.
+ * ========================================================================= */
+
+define('RFAT_HALTUNG_SLUG',   'haltung');
+define('RFAT_HALTUNG_TITEL',  'Haltung');
+define('RFAT_HALTUNG_OPTION', 'rfat_haltung_seite');
+
+/**
+ * Der Text der Seite.
+ *
+ * Steht hier und nicht im Seiteneditor, damit er über GitHub mitfährt und
+ * nachvollziehbar bleibt, wer wann was daran geändert hat — dieselbe
+ * Begründung wie bei Impressum und Datenschutz.
+ */
+function rfat_haltung_text() {
+    return <<<'RCHTML'
+<p>Reparieren ist für alle da. Damit du weißt, worauf du dich einlässt, steht hier, wie wir es halten.</p>
+<h2>Alle sind willkommen</h2>
+<p>Wer sein Gerät retten will, ist hier richtig &ndash; ohne Wenn und Aber. Wir fragen nicht, wer du bist, woher du kommst oder wen du liebst. Wir sprechen dich mit dem Namen und den Pronomen an, die du uns nennst.</p>
+<p>Erzählen musst du dafür nichts. Wir fragen nur, was für die Reparatur nötig ist &ndash; und auch das so sparsam wie möglich, siehe <a href="/datenschutz/">Datenschutz</a>.</p>
+<h2>Wogegen wir stehen</h2>
+<p>Rassismus, Antisemitismus, antimuslimischer Rassismus, Sexismus, Queer- und Transfeindlichkeit, Behindertenfeindlichkeit und jede Form von Faschismus haben an unseren Tischen keinen Platz. Das ist keine Meinung neben anderen, sondern die Bedingung dafür, dass hier alle ohne Sorge sitzen können.</p>
+<p>Wer andere herabsetzt, bedroht oder ausgrenzt, wird gebeten zu gehen. Das entscheidet das Team vor Ort.</p>
+<h2>Wenn dir etwas passiert</h2>
+<p>Sprich jemanden aus dem Team an &ndash; direkt vor Ort oder später per E-Mail an <a href="mailto:repair.ffm@outlook.com">repair.ffm@outlook.com</a>. Wir hören zu und kümmern uns darum. Was daraus wird, entscheidest du mit.</p>
+<h2>Antifaschismus ist Handarbeit</h2>
+<p>Wir sind eine Werkstatt und kein Bündnis &ndash; aber neutral sind wir nicht. Faschismus fängt nicht mit Fackelzügen an, sondern mit dem Spruch, der stehen bleibt, weil niemand widerspricht. Bei uns bleibt er nicht stehen: Wir widersprechen, und wir stellen uns vor die, die gemeint sind.</p>
+<p>Kein Fußbreit den Faschisten &ndash; auch nicht im Kleinen, auch nicht an unseren Tischen.</p>
+<h2>Free all Antifas</h2>
+<p>Wer sich Nazis in den Weg stellt, steht dafür in Europa vor Gericht, manche sitzen in Haft. Unsere Solidarität gehört ihnen. Antifaschismus ist kein Verbrechen &ndash; er ist die Bedingung dafür, dass Orte wie dieser überhaupt bestehen können.</p>
+<p>Solidarisch sein kostet wenig: hinschauen, widersprechen, Prozesse besuchen, für Anwaltskosten sammeln. Wer damit anfangen will, spricht uns beim nächsten Termin an.</p>
+RCHTML;
+}
+
+/**
+ * Die Seite anlegen, falls es sie noch nicht gibt.
+ *
+ * @return int Seiten-ID, oder 0 wenn nichts angelegt werden konnte.
+ */
+function rfat_haltung_seite_anlegen() {
+    $vorhanden = get_page_by_path(RFAT_HALTUNG_SLUG);
+    if ($vorhanden) {
+        return (int) $vorhanden->ID;
+    }
+
+    $id = wp_insert_post([
+        'post_title'   => RFAT_HALTUNG_TITEL,
+        'post_name'    => RFAT_HALTUNG_SLUG,
+        'post_content' => rfat_haltung_text(),
+        'post_status'  => 'publish',
+        'post_type'    => 'page',
+    ]);
+
+    return is_wp_error($id) ? 0 : (int) $id;
+}
+
+/* -------------------------------------------------------------------------
+ * Die WordPress-Beispielseite wegraeumen
+ *
+ * „Beispiel-Seite" stand im Menue zwischen den echten Seiten — die Vorlage,
+ * die WordPress bei der Installation anlegt. Sie ist Top-Level und
+ * veroeffentlicht, und genau daraus baut sich unser Menue.
+ *
+ * In den Papierkorb, nicht endgueltig geloescht, und nur solange der Text
+ * der unveraenderte Auslieferungszustand ist: Wer die Seite selbst
+ * beschrieben hat, meint sie auch so. Beides zusammen macht den Schritt
+ * ungefaehrlich — im Zweifel passiert nichts, und was passiert, laesst sich
+ * mit einem Klick zuruecknehmen.
+ * ----------------------------------------------------------------------- */
+
+define('RFAT_BEISPIEL_OPTION', 'rfat_beispielseite');
+
+/**
+ * @return int Seiten-ID der weggeraeumten Seite, sonst 0.
+ */
+function rfat_beispielseite_wegraeumen() {
+    foreach (['beispiel-seite', 'sample-page'] as $slug) {
+        $seite = get_page_by_path($slug);
+        if (!$seite || $seite->post_status === 'trash') {
+            continue;
+        }
+
+        $unberuehrt = stripos($seite->post_content, 'Dies ist eine Beispiel-Seite') !== false
+            || stripos($seite->post_content, 'This is an example page') !== false;
+        if (!$unberuehrt) {
+            continue;
+        }
+
+        wp_trash_post($seite->ID);
+
+        return (int) $seite->ID;
+    }
+
+    return 0;
+}
+
+add_action('init', function () {
+    if (get_option(RFAT_HALTUNG_OPTION) !== false) {
+        return;
+    }
+
+    $id = rfat_haltung_seite_anlegen();
+    if (!$id) {
+        // Nichts merken: Beim naechsten Aufruf noch einmal versuchen. Eine
+        // 0 in der Option hiesse "erledigt" und die Seite käme nie.
+        return;
+    }
+
+    update_option(RFAT_HALTUNG_OPTION, $id, false);
+
+    // Damit der Menüpunkt sofort dasteht und nicht erst in zwölf Stunden.
+    delete_transient('rfat_menu_items');
+}, 30);
+
+add_action('init', function () {
+    if (get_option(RFAT_BEISPIEL_OPTION) !== false) {
+        return;
+    }
+
+    $id = rfat_beispielseite_wegraeumen();
+
+    /*
+     * Anders als beim Anlegen der Haltungs-Seite wird auch die 0 gemerkt:
+     * "nachgesehen, nichts zu tun" ist hier ein gueltiges Ergebnis. Sonst
+     * liefe die Suche bei jedem Aufruf erneut, obwohl es die Seite nie gab
+     * oder jemand sie selbst beschrieben hat.
+     */
+    update_option(RFAT_BEISPIEL_OPTION, $id, false);
+
+    if ($id) {
+        delete_transient('rfat_menu_items');
+    }
+}, 31);
+
+/* =========================================================================
  * TERMINBUCHUNG
  *
  * Diese Funktionen lagen bis 1.11.0 in einem mu-Plugin
@@ -4295,6 +4444,7 @@ if (!function_exists('rc_build_slots')) {
                 "<p>Wir treffen uns regelmäßig zum gemeinsamen Reparieren. Die aktuell buchbaren Termine findest du unter <a href=\"/termin-buchen/\">Termin buchen</a>.</p>\n<h2>Ort</h2>\n<p><em>[Bitte Veranstaltungsort / Adresse hier eintragen.]</em></p>\n<h2>Was mitbringen?</h2>\n<ul><li>Dein defektes Gerät (Handy, Laptop, IT) oder E-Bike</li><li>Passendes Ladegerät / Netzteil</li><li>Zugangscode bzw. Passwort bei IT-Geräten</li><li>Bei E-Bikes: Akkuschlüssel</li></ul>"),
             'mitmachen' => array('Mitmachen',
                 "<h2>Werde Teil des Teams</h2>\n<p>Repair FFM lebt vom Ehrenamt. Du schraubst gern, lötest, flashst Handys oder kennst dich mit E-Bikes aus? Komm dazu &ndash; egal ob Profi oder neugierige:r Einsteiger:in.</p>\n<p>Alles ist ehrenamtlich und ohne Gewinnabsicht. Wir freuen uns über jede helfende Hand.</p>\n<p><em>[Kontaktweg zum Mitmachen hier eintragen &ndash; z. B. beim nächsten Termin vorbeikommen.]</em></p>"),
+            RFAT_HALTUNG_SLUG => array(RFAT_HALTUNG_TITEL, rfat_haltung_text()),
             'impressum' => array('Impressum', $imp),
             'datenschutz' => array('Datenschutz', $dsg),
         );

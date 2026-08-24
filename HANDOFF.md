@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 24.08.2026 · Plugin-Version 1.17.1
+Stand: 24.08.2026 · Plugin-Version 1.18.0
 
 ---
 
@@ -105,6 +105,7 @@ nur für Angemeldete sichtbar.
 |---|---|---|---|
 | Termin buchen | `/termin-buchen/` | 6 | `[repairffm_booking]` |
 | Termin abrufen | `/termin-abrufen/` | 37 | `[rfat_manage_booking]` (von uns angelegt) |
+| Haltung | `/haltung/` | | Wofür die Werkstatt offen ist, was hier keinen Platz hat (von uns angelegt, ab 1.18.0) |
 | Start, Termine & Ort, Mitmachen, Impressum, Datenschutz | | | Theme-Seiten |
 
 ---
@@ -332,6 +333,7 @@ Versionssprung zum ersten Mal.
 | 1.16.0 | Buchung führt **direkt** auf `/termin-abrufen/` — Zwischenseite und zweites E-Mail-Formular entfallen (183 Zeilen weniger) |
 | 1.17.0 | **Kennwortsperre entfernt** — das Gate-mu-Plugin wird stillgelegt, obwohl seine Datei nicht im Repo liegt; Cookie-Absatz im Datenschutz richtiggestellt |
 | 1.17.1 | **Seitenrand auf dem Handy zurück** (ging in 1.14.0 verloren); lange Komposita in Überschriften brechen um |
+| 1.18.0 | Seite **„Haltung"** — alle willkommen, kein Platz für Rassismus, Queer-/Transfeindlichkeit und Faschismus, antifaschistische Solidarität; WordPress-Beispielseite in den Papierkorb |
 
 ---
 
@@ -352,6 +354,8 @@ Versionssprung zum ersten Mal.
 - ✅ Zusage-Schritt: Termine sind erst nach Bestätigung verbindlich
 - ✅ Kalendereintrag und Selbstverwaltungs-Link nach der Buchung
 - ✅ Kennwortsperre entfernt (1.17.0) — ohne Serverzugriff, aus dem Plugin heraus
+- ✅ Seite „Haltung" (1.18.0) — Willkommenszusage und klare Grenze, im Menü
+- ✅ WordPress-Beispielseite aus dem Menü geräumt (1.18.0)
 
 ---
 
@@ -492,6 +496,51 @@ Datenschutzerklärung.
   setzen muss ihn jemand von Hand, das ist keine Entscheidung fürs Plugin.
 - Startseite, Datenschutz und Impressum müssen vor dem Livegang stehen;
   fertige Texte lagen dem Betreiber am 21.08.2026 vor.
+
+### Die Seite „Haltung" — neu in 1.18.0
+
+Eine eigene Seite unter `/haltung/`: dass alle willkommen sind, was hier
+keinen Platz hat (Rassismus, Antisemitismus, antimuslimischer Rassismus,
+Sexismus, Queer- und Transfeindlichkeit, Behindertenfeindlichkeit,
+Faschismus), an wen man sich wendet, wenn doch etwas passiert — und zum
+Schluss zwei Abschnitte, die die Seite ausdrücklich antifaschistisch
+verorten („Antifaschismus ist Handarbeit", „Free all Antifas"): Solidarität
+mit denen, die deswegen vor Gericht stehen, samt der Wege, selbst
+solidarisch zu werden. Ausdrücklich so gewollt vom Betreiber (24.08.2026);
+die Seite ist damit ein politisches Statement und kein Hausordnungstext.
+
+**Die Zusage bleibt allgemein — ohne Aufzählung.** „Wir fragen nicht, wer
+du bist, woher du kommst oder wen du liebst" statt einer Liste von
+Herkünften, Geschlechtern und Orientierungen: Eine Liste kann jemanden
+vergessen, ein Satz nicht. Konkret wird die Seite dort, wo es zählt — bei
+dem, was hier keinen Platz hat. So gewollt vom Betreiber (24.08.2026).
+
+**Angelegt wird sie einmalig und zusätzlich**, nicht über
+`rc_setup_version`: Das Hochzählen schreibt alle Seiten neu und nimmt
+eigene Änderungen im Seiteneditor mit. Gibt es unter `/haltung/` schon
+eine Seite, bleibt sie unangetastet — ein einmal geschriebener Text
+gehört dem Betreiber, nicht dem Plugin. Gemerkt wird das in der Option
+`rfat_haltung_seite` (die Seiten-ID).
+
+**Ins Menü kommt sie von selbst:** `rfat_menu_items_from_pages()` nimmt
+veröffentlichte Top-Level-Seiten in der Reihenfolge `menu_order,
+post_title`. Das Anlegen verwirft deshalb nur noch den Cache
+`rfat_menu_items`, damit der Punkt sofort dasteht statt in zwölf Stunden.
+
+**Die WordPress-Beispielseite** („Beispiel-Seite") stand im Menü zwischen
+den echten Seiten — sie ist Top-Level und veröffentlicht, und genau daraus
+baut sich das Menü. Sie wandert einmalig in den **Papierkorb**, und nur
+solange ihr Text der unveränderte Auslieferungszustand ist („Dies ist eine
+Beispiel-Seite" / „This is an example page"). Wer sie selbst beschrieben
+hat, meint sie auch so — dann passiert nichts. Gemerkt in
+`rfat_beispielseite` (Seiten-ID, oder `0` für „nachgesehen, nichts zu
+tun").
+
+**Text ändern:** in `rfat_haltung_text()` im Plugin — dann fährt er über
+GitHub mit und es bleibt nachvollziehbar, wer wann was geändert hat
+(dieselbe Begründung wie bei Impressum und Datenschutz). Wer ihn lieber
+im Seiteneditor pflegt, kann das tun: Das Plugin schreibt die Seite nach
+dem ersten Anlegen nicht mehr an.
 
 ### Kennwortsperre raus — erledigt in 1.17.0
 
@@ -961,7 +1010,8 @@ Transients:     rfat_github_release (6 h), rfat_menu_items (12 h),
                 rfat_status (5 min), rfat_cleanup_ran (24 h)
 Meta (unseres): _rfat_status, _rfat_email, _rfat_email_keep, _rfat_notified
 Optionen:       rfat_notify_to, rfat_notify_log, rfat_release_log,
-                rfat_gate_entfernt, rfat_gate_hinweis, rfat_gate_datenschutz
+                rfat_gate_entfernt, rfat_gate_hinweis, rfat_gate_datenschutz,
+                rfat_haltung_seite, rfat_beispielseite
 Status:         angefragt, bestaetigt, offen, erledigt, storniert
 Handy-Menü:     .rfat-nav-open, .rfat-nav-overlay, .rfat-nav-link
 Nach Buchung:   #rfat-after-booking (in den fremden Dialog eingehängt)
