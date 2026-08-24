@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.17.0
+ * Version: 1.17.1
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1782,6 +1782,64 @@ add_action('wp_head', function () {
          */
         .rfat-topbar:not([hidden]) {
             display: flex;
+        }
+
+        /* ============ Handy: Inhalt vom Rand lösen ============
+         *
+         * Block-Themes steuern den Seitenrand über zwei CSS-Variablen aus
+         * theme.json. Dieses Theme setzt beide auf 0 — am Rechner fällt das
+         * nicht auf, weil der Inhalt ohnehin auf 820px zentriert steht; auf
+         * dem Handy klebt dagegen jede Zeile an der Kante.
+         *
+         * Über die Variablen und nicht über eigene Regeln: Nur so bleiben
+         * ganzflächige Hintergründe randlos (`alignfull`, hier der Verlauf
+         * hinter dem Hero), während der Text einrückt. Das ist der
+         * offizielle Mechanismus der Block-Themes.
+         *
+         * Diese Regeln standen schon einmal hier und sind in 1.14.0
+         * versehentlich mit dem Theme-Menü-CSS mitgegangen („Theme-Menue
+         * wirklich entfernen statt verstecken"). Seitdem klebte der Text.
+         * Deshalb der Hinweis: Sie haben mit der Navigation nichts zu tun
+         * und gehören beim nächsten Aufräumen dort nicht dazu.
+         */
+        @media (max-width: 782px) {
+            :root,
+            body {
+                --wp--style--root--padding-left: 20px !important;
+                --wp--style--root--padding-right: 20px !important;
+            }
+
+            /*
+             * Bewusst nur die Variablen und kein zusaetzliches Polster fuer
+             * einzelne Container: Gemessen an allen sieben Seiten reichen
+             * sie. Ein breites Auffangnetz (`.entry-content`, Layout-Kinder)
+             * legte sich auf den Seiten, die ohnehin am Global-Padding
+             * haengen, obendrauf — der Text stand dann 40 statt 20 Pixel vom
+             * Rand, die Karten der Startseite sichtbar schmaler.
+             */
+
+            /* Kein doppelter Abstand, wo wir schon selbst polstern */
+            .rfat-pub-wrap {
+                padding-left: 0;
+                padding-right: 0;
+            }
+
+            /* Überschriften schlanker — der Hero kann h1 oder h2 sein */
+            h1 { font-size: clamp(28px, 8.5vw, 36px); line-height: 1.12; }
+            h2 { font-size: clamp(24px, 7vw, 30px); line-height: 1.15; }
+
+            /*
+             * Lange Komposita umbrechen lassen. „Verbraucherstreitbeilegung"
+             * im Impressum ist als h2 auf einem 390-Pixel-Display 427 Pixel
+             * breit — das Wort lief bisher rechts aus dem Bild, unsichtbar,
+             * weil `overflow-x: hidden` auf dem body den Rest abschneidet.
+             * `hyphens` trennt nach den Regeln der Seitensprache (lang="de"),
+             * `overflow-wrap` ist die Notbremse fuer alles ohne Trennstelle.
+             */
+            h1, h2, h3 {
+                overflow-wrap: break-word;
+                hyphens: auto;
+            }
         }
 
         @media (max-width: 600px) {

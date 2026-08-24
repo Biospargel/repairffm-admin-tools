@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 22.08.2026 · Plugin-Version 1.17.0
+Stand: 24.08.2026 · Plugin-Version 1.17.1
 
 ---
 
@@ -198,8 +198,19 @@ Customizer-CSS gewinnt.
 - **Buttons** (`.btn`, `.btn.ghost`): grün `#2f7d4f`, passend zum Theme-Button
   (`.wp-element-button`, Radius 11px). Fluid via `clamp()`.
 - **Randabstand mobil:** über die CSS-Variablen
-  `--wp--style--root--padding-left/right` (offizieller Block-Theme-Mechanismus)
-  plus Fallback für Layout-Container.
+  `--wp--style--root--padding-left/right` (offizieller Block-Theme-Mechanismus).
+  Das Theme setzt beide auf `0`; bis 782px überschreiben wir sie auf 20px.
+  Nur so bleiben ganzflächige Hintergründe (`alignfull`, z. B. der Hero)
+  randlos, während der Text einrückt.
+  > ⚠️ Diese Regeln waren in **1.14.0** versehentlich mit dem Theme-Menü-CSS
+  > mitentfernt worden — der Text klebte seitdem am Rand. Zurück in 1.17.1.
+  > Ein zusätzliches Auffangnetz für einzelne Container gibt es bewusst
+  > **nicht** mehr: Auf den Seiten, die ohnehin am Global-Padding hängen,
+  > legte es sich obendrauf (40 statt 20 Pixel, schmalere Karten).
+- **Lange Wörter in Überschriften** (`h1`–`h3`): `hyphens: auto` plus
+  `overflow-wrap`. „Verbraucherstreitbeilegung" im Impressum ist als h2 auf
+  einem 390px-Display 427px breit und lief bis 1.17.1 rechts aus dem Bild —
+  unsichtbar, weil `overflow-x: hidden` den Rest abschneidet.
 - **Handy-Menü:** siehe 3.5 — seit 1.8.0 ein eigenständiges Menü statt des
   Theme-Overlays.
 - **Breakpoints:** Layout-Anpassungen bis 782px, das **Menü bis 600px**. 600px
@@ -320,6 +331,7 @@ Versionssprung zum ersten Mal.
 | 1.15.0 | Weniger Datenbank-Zugriffe (Meta-Batching, zwei kurze Caches); CSS wird **beim Ausliefern** gestrichen statt in der Quelle |
 | 1.16.0 | Buchung führt **direkt** auf `/termin-abrufen/` — Zwischenseite und zweites E-Mail-Formular entfallen (183 Zeilen weniger) |
 | 1.17.0 | **Kennwortsperre entfernt** — das Gate-mu-Plugin wird stillgelegt, obwohl seine Datei nicht im Repo liegt; Cookie-Absatz im Datenschutz richtiggestellt |
+| 1.17.1 | **Seitenrand auf dem Handy zurück** (ging in 1.14.0 verloren); lange Komposita in Überschriften brechen um |
 
 ---
 
@@ -472,9 +484,12 @@ Datenschutzerklärung.
 - Customizer → Zusätzliches CSS enthält noch die alten `.btn`-Regeln.
   Seit 1.3.0 redundant, kann gelöscht werden.
 - ~~Kennwortschutz ist noch aktiv~~ — erledigt in 1.17.0.
-- Suchmaschinen-Sichtbarkeit prüfen (Einstellungen → Lesen). Das Plugin
-  sagt im Hinweis nach dem Entsperren, wie der Haken gerade steht — setzen
-  muss ihn jemand von Hand, das ist keine Entscheidung fürs Plugin.
+- **Suchmaschinen-Sichtbarkeit — offen.** Am 24.08.2026 live geprüft: Die
+  Seite liefert weiterhin `<meta name="robots" content="noindex, nofollow">`.
+  Der Haken *Einstellungen → Lesen → „Suchmaschinen davon abhalten"* ist
+  also noch gesetzt; ohne ihn zu lösen, taucht die Seite in keiner Suche auf.
+  Das Plugin sagt im Hinweis nach dem Entsperren, wie der Haken steht —
+  setzen muss ihn jemand von Hand, das ist keine Entscheidung fürs Plugin.
 - Startseite, Datenschutz und Impressum müssen vor dem Livegang stehen;
   fertige Texte lagen dem Betreiber am 21.08.2026 vor.
 
