@@ -2,11 +2,15 @@
 /**
  * Instagram-Handle-Check via Chromium (Playwright).
  *
- * Laedt fuer jeden Kandidaten die oeffentliche Profilseite und wertet den
- * Seitentitel aus:
- *   "<Name> (@handle) • Instagram photos and videos"  -> vergeben
- *   "Page Not Found • Instagram"                      -> kein Profil vorhanden
- *   Weiterleitung auf /accounts/login/ bzw. HTTP 429   -> Rate-Limit
+ * Geprueft wird die Embed-Ansicht `https://www.instagram.com/<handle>/embed/`.
+ * Sie ist fuer die Einbindung auf fremden Seiten gedacht und deshalb – anders
+ * als die normale Profilseite – ohne Login abrufbar. Die Seite rendert ihren
+ * Inhalt per JavaScript, ein reiner HTTP-Abruf reicht also nicht:
+ *
+ *   "<handle> <Name> 1,2M followers ..."                   -> vergeben
+ *   "The link to this profile may be broken, or the        -> kein Profil
+ *    profile may have been removed."                          vorhanden
+ *   HTTP 429 / Weiterleitung auf /accounts/login/          -> Rate-Limit
  *
  * Bei Rate-Limit wird mit exponentiellem Backoff erneut versucht. Ergebnisse
  * landen in results.json und werden nach jedem Kandidaten geschrieben, ein
@@ -16,7 +20,7 @@
  *   node check-usernames.js [kandidaten-datei]
  *
  * Umgebungsvariablen:
- *   BASE_DELAY   Pause zwischen zwei Kandidaten in ms (Standard 25000)
+ *   BASE_DELAY   Pause zwischen zwei Kandidaten in ms (Standard 8000)
  *   CHROME_PATH  Pfad zum Chromium-Binary
  *   PLAYWRIGHT   Pfad zum playwright-Modul
  *
@@ -31,7 +35,7 @@ const PLAYWRIGHT = process.env.PLAYWRIGHT || 'playwright';
 const { chromium } = require(PLAYWRIGHT);
 
 const CHROME_PATH = process.env.CHROME_PATH || undefined;
-const BASE_DELAY = Number(process.env.BASE_DELAY || 25000);
+const BASE_DELAY = Number(process.env.BASE_DELAY || 8000);
 const LIST = process.argv[2] || path.join(__dirname, 'candidates.txt');
 const OUT = path.join(__dirname, 'results.json');
 
@@ -44,6 +48,8 @@ const candidates = fs
 const results = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : {};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const GONE = /link to this profile may be broken|profile may have been removed/i;
+
 async function classify(page, user) {
   let docStatus = null;
   const onResp = (r) => {
@@ -51,34 +57,31 @@ async function classify(page, user) {
   };
   page.on('response', onResp);
   try {
-    await page.goto('https://www.instagram.com/' + user + '/', {
-      waitUntil: 'domcontentloaded',
+    await page.goto('https://www.instagram.com/' + user + '/embed/', {
+      waitUntil: 'networkidle',
       timeout: 45000,
     });
   } catch (e) {
     // Chromium wirft bei 4xx ohne Body ERR_HTTP_RESPONSE_CODE_FAILURE;
-    // die Einordnung passiert unten ueber docStatus und URL.
+    // die Einordnung passiert unten ueber docStatus und Seiteninhalt.
   } finally {
     page.off('response', onResp);
   }
 
-  const url = page.url();
-  let title = '';
+  let text = '';
   try {
-    title = await page.title();
+    text = (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ').trim();
   } catch (e) {}
 
-  if (docStatus === 429 || url.includes('/accounts/login')) return { state: 'ratelimited', title, docStatus };
-  if (/\(@/.test(title)) return { state: 'taken', title, docStatus };
-  if (/Page Not Found|Seite nicht gefunden/i.test(title)) return { state: 'free', title, docStatus };
-
-  let body = '';
-  try {
-    body = (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ').slice(0, 200);
-  } catch (e) {}
-  if (/isn't available|nicht verf/i.test(body)) return { state: 'free', title, body, docStatus };
-  if (/Log in|Anmelden/i.test(body)) return { state: 'ratelimited', title, body, docStatus };
-  return { state: 'unknown', title, body, docStatus };
+  if (docStatus === 429 || page.url().includes('/accounts/login')) {
+    return { state: 'ratelimited', docStatus, text: text.slice(0, 120) };
+  }
+  if (GONE.test(text)) return { state: 'free', docStatus };
+  if (new RegExp('^' + user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(text)) {
+    return { state: 'taken', docStatus, text: text.slice(0, 120) };
+  }
+  if (/followers|Posts|Beitr/i.test(text)) return { state: 'taken', docStatus, text: text.slice(0, 120) };
+  return { state: 'unknown', docStatus, text: text.slice(0, 200) };
 }
 
 (async () => {
@@ -106,7 +109,7 @@ async function classify(page, user) {
       const res = await classify(page, user);
       if (res.state !== 'ratelimited') {
         results[user] = res;
-        console.log(`${user.padEnd(10)} ${res.state.padEnd(6)} ${(res.title || '').slice(0, 60)}`);
+        console.log(`${user.padEnd(10)} ${res.state.padEnd(7)} ${(res.text || '').slice(0, 60)}`);
         backoff = Math.max(60000, backoff / 2);
         break;
       }
@@ -118,7 +121,7 @@ async function classify(page, user) {
     if (!results[user]) results[user] = { state: 'ratelimited' };
 
     fs.writeFileSync(OUT, JSON.stringify(results, null, 1));
-    await sleep(BASE_DELAY + Math.random() * 10000);
+    await sleep(BASE_DELAY + Math.random() * 4000);
   }
 
   await browser.close();
