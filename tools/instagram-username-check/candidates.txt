@@ -1,0 +1,41 @@
+# Kandidaten fuer kurze Instagram-Handles, eine pro Zeile.
+# Erlaubte Zeichen: a-z 0-9 . _  (Punkt nicht am Anfang/Ende, keine zwei Punkte)
+# Sortiert von kurz nach lang.
+q
+z
+x
+j
+qz
+zq
+xq
+qx
+jq
+qj
+vq
+zx
+q7
+7q
+kq
+wq
+qzx
+xqz
+jqz
+zqv
+vqz
+q7z
+z7q
+x9q
+qzj
+qxv
+wqz
+kqz
+qzk
+hqz
+q_z
+z_q
+qz_
+_qz
+qzxj
+xqzj
+jqzx
+q7zx
