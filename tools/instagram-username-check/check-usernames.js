@@ -1,16 +1,29 @@
 #!/usr/bin/env node
 /**
- * Instagram-Handle-Check via Chromium (Playwright).
+ * Instagram-Handle-Check via Chromium (Playwright), zweistufig.
  *
- * Geprueft wird die Embed-Ansicht `https://www.instagram.com/<handle>/embed/`.
- * Sie ist fuer die Einbindung auf fremden Seiten gedacht und deshalb – anders
- * als die normale Profilseite – ohne Login abrufbar. Die Seite rendert ihren
- * Inhalt per JavaScript, ein reiner HTTP-Abruf reicht also nicht:
+ * Stufe 1 – Embed-Ansicht `https://www.instagram.com/<handle>/embed/`
+ *   Sie ist fuer die Einbindung auf fremden Seiten gedacht und deshalb ohne
+ *   Login abrufbar, wird aber nur fuer *oeffentliche* Profile gefuellt:
  *
- *   "<handle> <Name> 1,2M followers ..."                   -> vergeben
- *   "The link to this profile may be broken, or the        -> kein Profil
- *    profile may have been removed."                          vorhanden
- *   HTTP 429 / Weiterleitung auf /accounts/login/          -> Rate-Limit
+ *     "<handle> <Name> 1,2M followers ..."  -> sicher vergeben, fertig
+ *     "profile may have been removed"       -> unklar, Stufe 2 noetig
+ *     "Invalid Link"                        -> unklar, Stufe 2 noetig
+ *
+ *   Achtung: private Profile liefern hier dieselbe Meldung wie nicht
+ *   vergebene Handles. Die Embed-Ansicht kann also nur "vergeben" beweisen,
+ *   niemals "frei" – @zq (privat) und @j sahen hier beide aus wie frei,
+ *   sind aber beide vergeben.
+ *
+ * Stufe 2 – Profilseite `https://www.instagram.com/<handle>/`
+ *   Sie ist verbindlich, wird ohne Login aber frueh gedrosselt:
+ *
+ *     Titel "<Name> (@handle) • Instagram photos and videos" -> vergeben
+ *     Titel "Page Not Found • Instagram"                     -> kein Profil
+ *     HTTP 429 / Weiterleitung auf /accounts/login/          -> Rate-Limit
+ *
+ * Stufe 1 spart die knappe Ressource: alles, was dort schon als vergeben
+ * feststeht, belastet die Profilseite nicht mehr.
  *
  * Bei Rate-Limit wird mit exponentiellem Backoff erneut versucht. Ergebnisse
  * landen in results.json und werden nach jedem Kandidaten geschrieben, ein
@@ -20,7 +33,7 @@
  *   node check-usernames.js [kandidaten-datei]
  *
  * Umgebungsvariablen:
- *   BASE_DELAY   Pause zwischen zwei Kandidaten in ms (Standard 8000)
+ *   BASE_DELAY   Pause zwischen zwei Kandidaten in ms (Standard 9000)
  *   CHROME_PATH  Pfad zum Chromium-Binary
  *   PLAYWRIGHT   Pfad zum playwright-Modul
  *
@@ -35,7 +48,7 @@ const PLAYWRIGHT = process.env.PLAYWRIGHT || 'playwright';
 const { chromium } = require(PLAYWRIGHT);
 
 const CHROME_PATH = process.env.CHROME_PATH || undefined;
-const BASE_DELAY = Number(process.env.BASE_DELAY || 8000);
+const BASE_DELAY = Number(process.env.BASE_DELAY || 9000);
 const LIST = process.argv[2] || path.join(__dirname, 'candidates.txt');
 const OUT = path.join(__dirname, 'results.json');
 
@@ -48,40 +61,52 @@ const candidates = fs
 const results = fs.existsSync(OUT) ? JSON.parse(fs.readFileSync(OUT, 'utf8')) : {};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const GONE = /link to this profile may be broken|profile may have been removed/i;
+const NO_PUBLIC_PROFILE = /link to this profile may be broken|profile may have been removed|Invalid Link/i;
 
-async function classify(page, user) {
+async function load(page, url, waitUntil) {
   let docStatus = null;
   const onResp = (r) => {
     if (r.request().resourceType() === 'document') docStatus = r.status();
   };
   page.on('response', onResp);
   try {
-    await page.goto('https://www.instagram.com/' + user + '/embed/', {
-      waitUntil: 'networkidle',
-      timeout: 45000,
-    });
+    await page.goto(url, { waitUntil, timeout: 45000 });
   } catch (e) {
     // Chromium wirft bei 4xx ohne Body ERR_HTTP_RESPONSE_CODE_FAILURE;
-    // die Einordnung passiert unten ueber docStatus und Seiteninhalt.
+    // die Einordnung passiert ueber docStatus und Seiteninhalt.
   } finally {
     page.off('response', onResp);
   }
+  await sleep(1500);
 
-  let text = '';
+  let title = '', text = '';
   try {
+    title = await page.title();
     text = (await page.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ').trim();
   } catch (e) {}
+  return { docStatus, title, text, url: page.url() };
+}
 
-  if (docStatus === 429 || page.url().includes('/accounts/login')) {
-    return { state: 'ratelimited', docStatus, text: text.slice(0, 120) };
+const limited = (r) => r.docStatus === 429 || r.url.includes('/accounts/login');
+
+/** Stufe 1: kann nur "vergeben" beweisen. */
+async function checkEmbed(page, user) {
+  const r = await load(page, `https://www.instagram.com/${user}/embed/`, 'networkidle');
+  if (limited(r)) return { state: 'ratelimited' };
+  if (NO_PUBLIC_PROFILE.test(r.text)) return { state: 'inconclusive' };
+  if (/followers|Beitr|posts/i.test(r.text)) return { state: 'taken', via: 'embed', text: r.text.slice(0, 120) };
+  return { state: 'inconclusive' };
+}
+
+/** Stufe 2: verbindlich. */
+async function checkProfile(page, user) {
+  const r = await load(page, `https://www.instagram.com/${user}/`, 'networkidle');
+  if (limited(r)) return { state: 'ratelimited' };
+  if (/\(@/.test(r.title)) return { state: 'taken', via: 'profile', title: r.title };
+  if (/Page Not Found|Seite nicht gefunden/i.test(r.title) || /isn't available|nicht verf/i.test(r.text)) {
+    return { state: 'free', via: 'profile' };
   }
-  if (GONE.test(text)) return { state: 'free', docStatus };
-  if (new RegExp('^' + user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i').test(text)) {
-    return { state: 'taken', docStatus, text: text.slice(0, 120) };
-  }
-  if (/followers|Posts|Beitr/i.test(text)) return { state: 'taken', docStatus, text: text.slice(0, 120) };
-  return { state: 'unknown', docStatus, text: text.slice(0, 200) };
+  return { state: 'unknown', via: 'profile', title: r.title, text: r.text.slice(0, 200) };
 }
 
 (async () => {
@@ -100,25 +125,33 @@ async function classify(page, user) {
   });
   const page = await browser.newPage();
 
-  let backoff = 60000;
-  for (const user of candidates) {
-    const done = results[user];
-    if (done && done.state !== 'ratelimited' && done.state !== 'unknown') continue;
-
+  let backoff = 45000;
+  const withBackoff = async (fn, user) => {
     for (let attempt = 0; attempt < 4; attempt++) {
-      const res = await classify(page, user);
+      const res = await fn(page, user);
       if (res.state !== 'ratelimited') {
-        results[user] = res;
-        console.log(`${user.padEnd(10)} ${res.state.padEnd(7)} ${(res.text || '').slice(0, 60)}`);
-        backoff = Math.max(60000, backoff / 2);
-        break;
+        backoff = Math.max(45000, backoff / 2);
+        return res;
       }
       console.log(`${user.padEnd(10)} rate-limit -> warte ${Math.round(backoff / 1000)}s`);
       await sleep(backoff);
       backoff = Math.min(backoff * 2, 600000);
       await page.context().clearCookies();
     }
-    if (!results[user]) results[user] = { state: 'ratelimited' };
+    return { state: 'ratelimited' };
+  };
+
+  for (const user of candidates) {
+    const done = results[user];
+    if (done && done.state !== 'ratelimited' && done.state !== 'unknown') continue;
+
+    let res = await withBackoff(checkEmbed, user);
+    if (res.state !== 'taken') {
+      await sleep(BASE_DELAY);
+      res = await withBackoff(checkProfile, user);
+    }
+    results[user] = res;
+    console.log(`${user.padEnd(10)} ${res.state.padEnd(7)} ${(res.title || res.text || '').slice(0, 55)}`);
 
     fs.writeFileSync(OUT, JSON.stringify(results, null, 1));
     await sleep(BASE_DELAY + Math.random() * 4000);
