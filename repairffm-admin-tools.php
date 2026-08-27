@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.26.0
+ * Version: 1.27.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -2134,7 +2134,55 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             .rfat-pub-field dt { margin: 0; color: #5b6b62; font-size: 14px; }
             .rfat-pub-field dd { margin: 0; font-weight: 600; color: #1c2a22; font-size: 14px; text-align: right; }
 
-            .rfat-pub-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0; }
+            /*
+             * Eine Reihe runder Zeilen, in derselben Sprache wie die Karte
+             * darüber: weiss, feiner Rand, weicher Radius. Volle Breite,
+             * damit sie auf dem Handy vom Daumen zu treffen sind und am
+             * Rechner eine ruhige Kante bilden.
+             */
+            .rfat-pub-liste { display: flex; flex-direction: column; gap: 10px; margin: 18px 0; }
+            .rfat-pub-liste > form { margin: 0; }
+            .rfat-pub-zeile {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                width: 100%;
+                box-sizing: border-box;
+                padding: 15px 18px;
+                background: #fff;
+                border: 1px solid #e7ebe8;
+                border-radius: 16px;
+                /* Derselbe weiche Schatten wie die Karte darueber - sonst
+                   sehen die Zeilen daneben flach aus statt dazugehoerig. */
+                box-shadow: 0 6px 20px rgba(31, 47, 39, 0.06);
+                color: #1c2a22;
+                font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                font-size: 16px;
+                font-weight: 700;
+                line-height: 1.3;
+                text-align: left;
+                text-decoration: none;
+                cursor: pointer;
+                transition: background .15s ease, border-color .15s ease, color .15s ease;
+            }
+            .rfat-pub-zeile:hover,
+            .rfat-pub-zeile:focus-visible {
+                background: #e8f1eb;
+                border-color: #2f7d4f;
+                color: #1f5a38;
+            }
+            .rfat-pub-zeichen { width: 21px; height: 21px; flex-shrink: 0; }
+            /*
+             * Absagen wirft einen Termin weg. Es steht unten und traegt als
+             * einziges eine andere Farbe — erkennbar, ohne zu schreien.
+             */
+            .rfat-pub-zeile.is-absage { color: #b3402f; }
+            .rfat-pub-zeile.is-absage:hover,
+            .rfat-pub-zeile.is-absage:focus-visible {
+                background: #fdecec;
+                border-color: #b3402f;
+                color: #7a1010;
+            }
             .rfat-pub-reschedule { border: 2px dashed #d7e0da; border-radius: 18px; padding: 20px; margin-top: 20px; background: #fbfcfb; }
             .rfat-pub-reschedule ol { margin: 6px 0 0; padding-left: 20px; }
             .rfat-pub-reschedule li { margin-bottom: 4px; }
@@ -2507,23 +2555,58 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 </div>
             </form>
 
-            <div class="rfat-pub-actions">
+            <?php
+            /*
+             * Die drei Sachen, die man mit einem Termin machen kann — als
+             * eine Reihe gleicher Zeilen.
+             *
+             * Vorher waren es zwei Pillen nebeneinander und eine dritte in
+             * einem eigenen Absatz darunter: drei gleichrangige Handlungen
+             * in zwei Formen, und keine davon passte zu der abgerundeten
+             * Karte darüber.
+             *
+             * Reihenfolge nach Folgenschwere: erst der Kalender, dann das
+             * Verschieben, zuletzt das Absagen — und das in Rot. Was einen
+             * Termin wegwirft, soll nicht die erste Zeile sein, auf die der
+             * Daumen faellt.
+             *
+             * Gezeichnete Zeichen statt Emoji: Das 📅 sah auf iOS anders aus
+             * als überall sonst — dieselbe Erfahrung wie beim ✅ in 1.11.0.
+             */
+            ?>
+            <div class="rfat-pub-liste">
+                <?php if ($analysis['datetime']): ?>
+                    <a class="rfat-pub-zeile" href="<?php echo esc_url(add_query_arg('ics', $norm_code, get_permalink())); ?>">
+                        <svg class="rfat-pub-zeichen" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                  d="M7 3v3M17 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
+                        </svg>
+                        <span>Zum Kalender hinzufügen</span>
+                    </a>
+                <?php endif; ?>
+
+                <button type="button" class="rfat-pub-zeile"
+                        onclick="var el=document.getElementById('rfat-reschedule-<?php echo esc_js($post->ID); ?>'); el.style.display = el.style.display==='none' ? 'block' : 'none';">
+                    <svg class="rfat-pub-zeichen" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                              d="M4 9h11a4 4 0 0 1 0 8h-2M4 9l3-3M4 9l3 3" />
+                    </svg>
+                    <span>Termin verschieben</span>
+                </button>
+
                 <form method="post" onsubmit="return confirm('Diesen Termin wirklich stornieren?');">
                     <?php wp_nonce_field('rfat_pub_cancel_' . $norm_code); ?>
                     <input type="hidden" name="rfat_pub_action" value="cancel" />
                     <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($norm_code); ?>" />
-                    <button type="submit" class="btn ghost">Termin stornieren</button>
+                    <button type="submit" class="rfat-pub-zeile is-absage">
+                        <svg class="rfat-pub-zeichen" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                            <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                  d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6" />
+                        </svg>
+                        <span>Termin stornieren</span>
+                    </button>
                 </form>
-                <button type="button" class="btn ghost" onclick="var el=document.getElementById('rfat-reschedule-<?php echo esc_js($post->ID); ?>'); el.style.display = el.style.display==='none' ? 'block' : 'none';">Termin verschieben</button>
             </div>
-
-            <?php if ($analysis['datetime']): ?>
-                <p style="margin:0 0 18px;">
-                    <a class="btn ghost" href="<?php echo esc_url(add_query_arg('ics', $norm_code, get_permalink())); ?>">
-                        &#128197; Zum Kalender hinzufügen
-                    </a>
-                </p>
-            <?php endif; ?>
 
             <div id="rfat-reschedule-<?php echo esc_attr($post->ID); ?>" class="rfat-pub-reschedule" style="display:none;">
                 <p><strong>So verschiebst du deinen Termin:</strong></p>
@@ -3228,15 +3311,12 @@ add_action('wp_head', function () {
 
         /* Eingeloggt verdeckt die Adminleiste sonst den oberen Rand */
 
-        /* Ab sehr schmalen Screens: Aktions-Buttons stapeln statt quetschen */
-        @media (max-width: 420px) {
-            .rfat-pub-actions {
-                flex-direction: column;
-            }
-            .rfat-pub-actions .btn {
-                width: 100%;
-            }
-        }
+        /*
+         * Hier stapelte eine Regel ab 420px die Aktions-Buttons, die
+         * nebeneinander standen. Seit 1.27.0 stehen sie ohnehin
+         * untereinander und in voller Breite — die Regel hatte nichts mehr
+         * zu tun.
+         */
     </style>
     <?php echo rfat_minify_style_tags(ob_get_clean()); ?>
     <?php

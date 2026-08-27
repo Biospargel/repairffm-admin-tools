@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.26.0
+Stand: 27.08.2026 · Plugin-Version 1.27.0
 
 ---
 
@@ -710,6 +710,35 @@ und ohne Leerzeichen geschrieben.
 
 ---
 
+### 3.14 Die Termin-Aktionen als runde Zeilen (1.27.0)
+
+Auf `/termin-abrufen/` standen *Termin stornieren* und *Termin verschieben*
+als zwei umrandete Pillen nebeneinander, *Zum Kalender hinzufügen* als
+dritte in einem eigenen Absatz darunter. Drei gleichrangige Handlungen in
+zwei Formen — und keine davon passte zu der abgerundeten Karte darüber.
+
+Jetzt sind es drei gleiche Zeilen in voller Breite: weiss, feiner Rand,
+`border-radius: 16px`, **derselbe weiche Schatten wie die Karte** — ohne
+ihn sähen sie daneben flach aus statt dazugehörig. Auf dem Handy sind sie
+vom Daumen zu treffen, am Rechner bilden sie eine ruhige Kante.
+
+**Reihenfolge nach Folgenschwere:** erst der Kalender, dann das Verschieben,
+zuletzt das Absagen — und das als einziges in Rot. Was einen Termin
+wegwirft, soll nicht die erste Zeile sein, auf die der Daumen fällt. Vorher
+stand *stornieren* an erster Stelle.
+
+Gezeichnete Zeichen statt Emoji: Das 📅 sah auf iOS anders aus als überall
+sonst — dieselbe Erfahrung wie beim ✅ in 1.11.0. Jetzt drei kleine SVGs in
+`currentColor`, die die Farbe der Zeile mitgehen (auch das Rot beim Absagen).
+
+Die Regel, die die Aktions-Buttons ab 420 px stapelte, ist ersatzlos weg:
+Sie stehen ohnehin untereinander.
+
+Nachgemessen mit Chromium: drei Zeilen, alle 620 px — **genau so breit wie
+die Karte darüber** —, Radius 16 px, Hover grün, Absage-Zeile rot.
+
+---
+
 ---
 
 ## 4. Versionshistorie
@@ -760,6 +789,7 @@ und ohne Leerzeichen geschrieben.
 | 1.24.0 | **Kategorien und Uhrzeiten einstellbar** statt fest im Code (siehe 3.11) |
 | 1.25.0 | Menü am Rechner als **schwebendes Feld rechts** statt Vollbild (siehe 3.12) |
 | 1.26.0 | **Produktionsreif:** Statuszeile nur noch für Angemeldete, feste Menü-Reihenfolge, Seiten aus dem Menü nehmbar, Platzhalter-Warnung (siehe 3.13) |
+| 1.27.0 | Die drei Termin-Aktionen als **runde Zeilen** in der Sprache der Karte darüber |
 
 ---
 
