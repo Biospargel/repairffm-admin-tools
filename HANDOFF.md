@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.24.0
+Stand: 27.08.2026 · Plugin-Version 1.25.0
 
 ---
 
@@ -595,6 +595,61 @@ statt einer leeren Fläche.
 
 ---
 
+### 3.12 Menü am Rechner: schwebendes Feld statt Vollbild (1.25.0)
+
+Auf dem Handy ist das Vollbild richtig — der Daumen braucht grosse Ziele,
+und Platz daneben gibt es nicht. Am Rechner war es daneben: Sieben
+Menüpunkte legten sich über eine Seite, auf der genug Platz wäre, und die
+Seite verschwand für einen Klick, der sie gar nicht verlassen soll.
+
+Ab **782 px** schwebt jetzt ein abgerundetes Feld (320 px, `border-radius:
+20px`, weicher Schatten) unter dem Knopf an der rechten Kante. Der
+Hintergrund bleibt liegen und fängt weiter Klicks ab — nur durchsichtig,
+also schliesst ein Klick daneben wie zuvor.
+
+**Vier Dinge, die daran hängen:**
+
+1. **Der Schliessen-Knopf ist ausgeblendet** — der Hamburger wird zum X und
+   bleibt durch den durchsichtigen Hintergrund sichtbar. `openMenu()` setzte
+   den Fokus aber auf genau diesen Knopf; ein ausgeblendeter nimmt keinen
+   Fokus an. Er geht jetzt auf den ersten Menüpunkt, erkannt an
+   `closeBtn.offsetParent === null`.
+2. **Die Fokusfalle filtert auf Sichtbares.** Der ausgeblendete Knopf stand
+   sonst in der Liste, konnte den Fokus aber nicht annehmen — beim Umlauf
+   wäre er aus dem Menü herausgefallen.
+3. **Kein Scroll-Lock mehr am Rechner.** Ein schwebendes Feld ist kein Grund,
+   die Seite festzuhalten, und der verschwindende Rollbalken verschöbe das
+   Layout.
+4. **Ein `resize`-Haken ist ersatzlos weg.** Er schloss das Menü, sobald das
+   Fenster breiter als 600 px wurde — aus der Zeit, als es das Menü nur auf
+   dem Handy gab. Er hätte das offene Feld beim Ziehen am Fensterrand
+   weggenommen.
+
+Der geschrumpfte Knopf (`is-small` beim Scrollen) sitzt höher; das Feld folgt
+über `.rfat-topbar.is-small + .rfat-nav-overlay …` statt über das Skript —
+die Klasse steht schon an der Leiste, und das Overlay folgt ihr unmittelbar.
+Nachgemessen: 12 px Abstand unter dem Knopf in **beiden** Zuständen.
+
+> **Aufgeklappt wird per Klick, nicht beim Darüberfahren.** Auf Touch-Geräten
+> mit breitem Fenster gibt es kein Hover, und ein Menü, das beim Vorbeiziehen
+> der Maus aufspringt, trifft man aus Versehen öfter als absichtlich.
+
+> **Fallstrick, im Test gefunden:** Die Regel für den durchsichtigen
+> Link-Hintergrund steht weiter unten in der Datei als die für `:hover` und
+> `.is-active` — bei gleicher Spezifität hätte sie beide überstimmt, und das
+> Feld hätte genau das verloren, was es ausmacht. Deshalb tragen Hover und
+> „du bist hier" im Feld ihre eigene, gleich spezifische Regel.
+
+Geprüft mit Chromium: 1280 px offen/zu/gescrollt, 800 px, 390 px (Handy
+unverändert), dazu die Hintergrundfarben von Hover, aktivem Punkt und
+„Termin buchen".
+
+Nebenbei richtiggestellt: `body.admin-bar .rfat-nav-overlay` stand auf 46 px,
+obwohl die Adminleiste ab 783 px nur 32 px hoch ist — 14 px Seite blitzten
+oben durch. Fiel nur angemeldeten Team-Mitgliedern auf.
+
+---
+
 ---
 
 ## 4. Versionshistorie
@@ -643,6 +698,7 @@ statt einer leeren Fläche.
 | 1.22.0 | **Gerät merkt sich den Buchungscode**; **Rückfragen** an den Gast mit Antwort auf der Terminseite; fertiger Signal-Nachrichtentext; weniger Text im Ablauf (siehe 3.10) |
 | 1.23.0 | Der Gast kann **von sich aus etwas nachtragen**, nicht nur auf Fragen antworten |
 | 1.24.0 | **Kategorien und Uhrzeiten einstellbar** statt fest im Code (siehe 3.11) |
+| 1.25.0 | Menü am Rechner als **schwebendes Feld rechts** statt Vollbild (siehe 3.12) |
 
 ---
 
