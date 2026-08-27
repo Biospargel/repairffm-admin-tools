@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.25.0
+Stand: 27.08.2026 · Plugin-Version 1.26.0
 
 ---
 
@@ -650,6 +650,66 @@ oben durch. Fiel nur angemeldeten Team-Mitgliedern auf.
 
 ---
 
+### 3.13 Produktionsreif (1.26.0)
+
+Drei Dinge, die vor dem Bekanntmachen der Adresse anders sein müssen.
+
+#### Die Statuszeile im Fuß sahen alle
+
+Bis 1.25.0 stand unten auf **jeder Seite** „Alle Dienste laufen · v1.26.0" —
+für jeden Besucher. Zwei Gründe, das zu ändern:
+
+1. Es sagt niemandem etwas, der einen Termin buchen will. *Welche* Dienste,
+   und was tue ich, wenn sie es nicht tun? Eine Werkstattanzeige an der
+   Ladentür.
+2. Dort stand die **Versionsnummer des Plugins**. Sie preiszugeben bringt
+   nichts und erspart jemandem, der es darauf anlegt, das Nachsehen, welche
+   Lücken diese Fassung hat.
+
+Angemeldet steht sie weiterhin da, samt Angabe, was klemmt.
+
+#### Feste Menü-Reihenfolge, und Seiten lassen sich herausnehmen
+
+Vorher lieferte `get_pages()` alles, was veröffentlicht war, sortiert nach
+`menu_order` und Titel — also im Zweifel alphabetisch: *Datenschutz* vor
+*Termin buchen*. Und jede Probeseite stand mit im Menü.
+
+Die Reihenfolge folgt jetzt dem Ablauf und steht in
+`rfat_menu_reihenfolge()`:
+
+> Startseite · Termin buchen · Termin abrufen · Termine & Ort · Mitmachen ·
+> *(alles Weitere)* · Impressum · Datenschutz
+
+**Unbekannte Seiten verschwinden nicht.** Sie stehen zwischen dem Inhalt und
+den Pflichtseiten, in der Reihenfolge, in der sie hereinkamen: Eine neue
+Seite soll auftauchen, ohne dass jemand im Code etwas nachträgt.
+Verschwinden soll sie nur, wenn es jemand so will — dafür gibt es in der
+Übersicht *Menü: was drinsteht* mit einem Haken je Seite.
+
+Gespeichert wird, was **nicht** ins Menü soll (`rfat_menu_aus`). Andersherum
+— die Erlaubten merken — verschwände jede neu angelegte Seite
+stillschweigend, bis jemand ein Häkchen setzt. Ohne eigene Einstellung
+fliegt genau eine Sache raus: WordPress' `beispiel-seite` / `sample-page`.
+Die Startseite lässt sich nicht abwählen.
+
+Zwischengespeichert wird seitdem die **rohe** Liste; Reihenfolge und Auswahl
+entstehen beim Lesen. Wer etwas ändert, sieht es sofort statt in zwölf
+Stunden.
+
+#### Warnung vor stehen gebliebenen Platzhaltern
+
+Die Seiten „Termine & Ort" und „Mitmachen" kommen mit Lücken zur Welt
+(`[Bitte Veranstaltungsort / Adresse hier eintragen.]`) — das Plugin kennt
+die Adresse nicht. Beim Impressum stand `[Name]` schon einmal live im Netz.
+
+`rfat_platzhalter_finden()` durchsucht deshalb die **veröffentlichten**
+Seiten nach eckigen Klammern, die einen Grossbuchstaben oder ein Leerzeichen
+enthalten, und die Übersicht zeigt sie samt Link zum Bearbeiten.
+Shortcodes fallen nicht darunter: `[repairffm_booking]` ist durchweg klein
+und ohne Leerzeichen geschrieben.
+
+---
+
 ---
 
 ## 4. Versionshistorie
@@ -699,6 +759,7 @@ oben durch. Fiel nur angemeldeten Team-Mitgliedern auf.
 | 1.23.0 | Der Gast kann **von sich aus etwas nachtragen**, nicht nur auf Fragen antworten |
 | 1.24.0 | **Kategorien und Uhrzeiten einstellbar** statt fest im Code (siehe 3.11) |
 | 1.25.0 | Menü am Rechner als **schwebendes Feld rechts** statt Vollbild (siehe 3.12) |
+| 1.26.0 | **Produktionsreif:** Statuszeile nur noch für Angemeldete, feste Menü-Reihenfolge, Seiten aus dem Menü nehmbar, Platzhalter-Warnung (siehe 3.13) |
 
 ---
 

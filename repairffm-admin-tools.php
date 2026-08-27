@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.25.0
+ * Version: 1.26.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -666,6 +666,35 @@ add_action('admin_init', function () {
         exit;
     }
 
+    if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'save_menu') {
+        if (!current_user_can('manage_options')
+            || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_save_menu')) {
+            wp_die('Sicherheitsprüfung fehlgeschlagen.');
+        }
+
+        /*
+         * Gespeichert wird, was NICHT ins Menü soll. Andersherum — die
+         * Erlaubten merken — verschwände jede neu angelegte Seite
+         * stillschweigend, bis jemand hier ein Häkchen setzt.
+         */
+        $alle = [];
+        foreach (rfat_get_menu_items(true) as $item) {
+            $slug = rfat_menu_slug($item['url']);
+            if ($slug !== '') {
+                $alle[$slug] = true;
+            }
+        }
+        $an  = isset($_POST['rfat_menu_an']) && is_array($_POST['rfat_menu_an'])
+            ? array_map('sanitize_title', wp_unslash($_POST['rfat_menu_an'])) : [];
+        $aus = array_values(array_diff(array_keys($alle), $an));
+
+        update_option(RFAT_MENU_AUS_OPTION, $aus);
+        delete_transient('rfat_menu_items');
+        wp_safe_redirect(add_query_arg('rfat_menu_saved', '1',
+            wp_get_referer() ?: admin_url('edit.php?post_type=rc_booking&page=rfat-overview')));
+        exit;
+    }
+
     if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'check_update') {
         if (!current_user_can('manage_options')
             || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_check_update')) {
@@ -726,6 +755,49 @@ function rfat_decode_key($encoded) {
     $encoded = strtr($encoded, '-_', '+/');
     $decoded = base64_decode($encoded, true);
     return $decoded === false ? '' : $decoded;
+}
+
+/**
+ * Nach Platzhaltern in eckigen Klammern suchen, die beim Einrichten
+ * stehen geblieben sind.
+ *
+ * Die Seiten „Termine & Ort" und „Mitmachen" kommen mit Lücken zur Welt:
+ * `[Bitte Veranstaltungsort / Adresse hier eintragen.]`. Das ist so
+ * gewollt — das Plugin kennt die Adresse nicht. Nur darf es nicht so
+ * bleiben, wenn die Seite öffentlich ist, und beim Impressum stand
+ * schon einmal `[Name]` live im Netz (siehe HANDOFF, 1.8.x).
+ *
+ * Gesucht wird im Klartext der veröffentlichten Seiten, nicht in
+ * Entwürfen. Shortcodes wie [repairffm_booking] sind ausgenommen: Sie
+ * stehen dort mit Absicht.
+ *
+ * @return array<int,array{titel:string,link:string,stelle:string}>
+ */
+function rfat_platzhalter_finden() {
+    $cached = get_transient('rfat_platzhalter');
+    if (is_array($cached)) {
+        return $cached;
+    }
+
+    $treffer = [];
+    $seiten  = get_pages(['post_status' => 'publish']);
+    if (is_array($seiten)) {
+        foreach ($seiten as $seite) {
+            // Nur Klammern mit einem Grossbuchstaben oder Leerzeichen darin —
+            // Shortcodes sind durchweg klein und ohne Leerzeichen geschrieben.
+            if (!preg_match('/\[[^\]]*[A-ZÄÖÜ ][^\]]*\]/u', (string) $seite->post_content, $m)) {
+                continue;
+            }
+            $treffer[] = [
+                'titel'  => get_the_title($seite->ID),
+                'link'   => get_edit_post_link($seite->ID, 'url'),
+                'stelle' => mb_substr(trim($m[0]), 0, 80),
+            ];
+        }
+    }
+
+    set_transient('rfat_platzhalter', $treffer, 10 * MINUTE_IN_SECONDS);
+    return $treffer;
 }
 
 function rfat_render_overview_page() {
@@ -816,6 +888,28 @@ function rfat_render_overview_page() {
         <?php endif; ?>
         <?php if (isset($_GET['rfat_limit_saved'])): ?>
             <div class="notice notice-success is-dismissible"><p>Buchungsgrenze gespeichert.</p></div>
+        <?php endif; ?>
+        <?php $platzhalter = rfat_platzhalter_finden(); ?>
+        <?php if ($platzhalter): ?>
+            <div class="notice notice-warning">
+                <p><strong>Auf veröffentlichten Seiten stehen noch Platzhalter.</strong>
+                   Besucher lesen sie mit — vor dem Bekanntmachen der Adresse gehören sie ersetzt.</p>
+                <ul style="margin:0 0 8px 18px;list-style:disc;">
+                    <?php foreach ($platzhalter as $stelle): ?>
+                        <li>
+                            <?php if ($stelle['link']): ?>
+                                <a href="<?php echo esc_url($stelle['link']); ?>"><?php echo esc_html($stelle['titel']); ?></a>
+                            <?php else: ?>
+                                <strong><?php echo esc_html($stelle['titel']); ?></strong>
+                            <?php endif; ?>
+                            — <code><?php echo esc_html($stelle['stelle']); ?></code>
+                        </li>
+                    <?php endforeach; ?>
+                </ul>
+            </div>
+        <?php endif; ?>
+        <?php if (isset($_GET['rfat_menu_saved'])): ?>
+            <div class="notice notice-success is-dismissible"><p>Menü gespeichert.</p></div>
         <?php endif; ?>
         <?php if (isset($_GET['rfat_kat_saved'])): ?>
             <div class="notice notice-success is-dismissible"><p>Kategorien gespeichert.</p></div>
@@ -955,6 +1049,59 @@ function rfat_render_overview_page() {
                     <?php endif; ?>
                 </p>
             </form>
+
+
+            <?php
+            /*
+             * Menü. Was hier steht, ist die Navigation der ganzen Seite —
+             * das Menü des Themes wird beim Rendern entfernt.
+             *
+             * Die Reihenfolge folgt dem Ablauf und steht im Code
+             * (rfat_menu_reihenfolge). Zu entscheiden bleibt, was
+             * überhaupt hineingehört: Probeseiten sollen nicht in der
+             * Navigation der Werkstatt stehen.
+             */
+            $menue_roh = rfat_get_menu_items(true);
+            $menue_aus = array_flip(rfat_menu_ausgeschlossen());
+            $menue_an  = 0;
+            foreach ($menue_roh as $eintrag) {
+                if (!isset($menue_aus[rfat_menu_slug($eintrag['url'])])) {
+                    $menue_an++;
+                }
+            }
+            ?>
+            <details style="margin:14px 0 0;" <?php echo isset($_GET['rfat_menu_saved']) ? 'open' : ''; ?>>
+                <summary style="cursor:pointer;font-weight:600;">Menü: was drinsteht (<?php echo (int) $menue_an; ?> von <?php echo count($menue_roh); ?>)</summary>
+                <form method="post" style="margin-top:10px;">
+                    <?php wp_nonce_field('rfat_save_menu'); ?>
+                    <input type="hidden" name="rfat_action" value="save_menu" />
+                    <?php foreach ($menue_roh as $eintrag):
+                        $slug = rfat_menu_slug($eintrag['url']);
+                        if ($slug === '') {
+                            // Die Startseite bleibt immer drin — ohne sie
+                            // käme man aus dem Menü nicht mehr nach Hause.
+                            continue;
+                        }
+                        ?>
+                        <label style="display:block;margin:4px 0;">
+                            <input type="checkbox" name="rfat_menu_an[]" value="<?php echo esc_attr($slug); ?>"
+                                   <?php checked(!isset($menue_aus[$slug])); ?> />
+                            <?php echo esc_html($eintrag['label']); ?>
+                            <code style="margin-left:6px;"><?php echo esc_html('/' . $slug . '/'); ?></code>
+                        </label>
+                    <?php endforeach; ?>
+                    <p style="margin:10px 0 0;">
+                        <button type="submit" class="button">Menü speichern</button>
+                        <span class="description" style="margin-left:8px;">
+                            Haken weg heisst: nicht im Menü. Die Seite selbst bleibt bestehen und
+                            über ihre Adresse erreichbar — löschen kannst du sie unter <em>Seiten</em>.
+                            <br />
+                            Die Reihenfolge liegt fest: Startseite, Termin buchen, Termin abrufen,
+                            Termine &amp; Ort, Mitmachen, dann alles Weitere, zuletzt Impressum und Datenschutz.
+                        </span>
+                    </p>
+                </form>
+            </details>
 
             <?php
             /*
@@ -3403,15 +3550,36 @@ add_action('wp_footer', function () {
     if (is_admin()) {
         return;
     }
+
+    /*
+     * Nur für angemeldete Team-Mitglieder.
+     *
+     * Bis 1.25.0 stand „Alle Dienste laufen · v1.25.0" im Fuß jeder Seite,
+     * für jeden Besucher. Zwei Gründe, das zu ändern:
+     *
+     * Erstens sagt es niemandem etwas, der einen Termin buchen will —
+     * welche Dienste, und was tue ich, wenn sie es nicht tun? Es ist eine
+     * Werkstattanzeige an der Ladentür.
+     *
+     * Zweitens stand dort die Versionsnummer des Plugins. Sie preiszugeben
+     * bringt nichts und erspart jemandem, der es darauf anlegt, das
+     * Nachsehen, welche Lücken diese Fassung hat.
+     *
+     * Für uns bleibt sie: angemeldet steht sie weiterhin da, und mit ihr
+     * die Angabe, was klemmt.
+     */
+    if (!current_user_can('manage_options')) {
+        return;
+    }
+
     $status  = rfat_service_status();
     $version = rfat_plugin_version();
 
     $failed = array_keys(array_filter($status['checks'], function ($v) { return !$v; }));
     $label  = $status['ok'] ? 'Alle Dienste laufen' : 'Eingeschränkt';
 
-    // Nur Angemeldete sehen, WAS klemmt — Besucher geht das nichts an.
     $detail = '';
-    if (!$status['ok'] && current_user_can('manage_options')) {
+    if (!$status['ok']) {
         $detail = ' (' . implode(', ', $failed) . ')';
     }
     ?>
@@ -3956,13 +4124,112 @@ function rfat_text_normalisieren($text) {
 /**
  * Pfad => Liste der Beschriftungen, unter denen dieser Punkt im Menü steht.
  */
+/*
+ * Reihenfolge und Auswahl des Menüs (seit 1.26.0).
+ *
+ * Vorher stand im Menü, was `get_pages()` hergab — sortiert nach
+ * menu_order und Titel. Auf einer Seite, auf der auch mal etwas
+ * ausprobiert wird, landen darin Probeseiten, und die Reihenfolge folgte
+ * dem Alphabet statt dem Ablauf: Datenschutz vor Termin buchen.
+ */
+define('RFAT_MENU_AUS_OPTION', 'rfat_menu_aus');
+
+/**
+ * Die gewünschte Reihenfolge, an den Kurznamen der Seiten festgemacht.
+ *
+ * Der Ablauf bestimmt sie, nicht das Alphabet: erst hin (Startseite),
+ * dann buchen, dann den eigenen Termin, dann das Drumherum — und zuletzt
+ * das Pflichtprogramm.
+ */
+function rfat_menu_reihenfolge() {
+    return ['', 'termin-buchen', 'termin-abrufen', 'termine-ort', 'mitmachen', 'impressum', 'datenschutz'];
+}
+
+/**
+ * Der Kurzname einer Menü-Adresse. Leer heißt Startseite.
+ */
+function rfat_menu_slug($url) {
+    $pfad = rfat_url_pfad($url);
+    if ($pfad === null || $pfad === '/') {
+        return '';
+    }
+    $teile = explode('/', trim($pfad, '/'));
+    return sanitize_title((string) end($teile));
+}
+
+/**
+ * Was nicht ins Menü soll.
+ *
+ * Ohne eigene Einstellung fliegt genau eine Sache raus: die Beispielseite,
+ * die WordPress bei jeder Installation anlegt. Sie ist kein Inhalt, den
+ * jemand sehen will, und sie heißt überall gleich — bei allem anderen
+ * entscheidet der Betreiber, denn ob eine Seite eine Probe ist, weiß das
+ * Plugin nicht.
+ */
+function rfat_menu_ausgeschlossen() {
+    $roh = get_option(RFAT_MENU_AUS_OPTION, null);
+    if (!is_array($roh)) {
+        return ['beispiel-seite', 'sample-page'];
+    }
+    $sauber = [];
+    foreach ($roh as $slug) {
+        $slug = sanitize_title((string) $slug);
+        if ($slug !== '') {
+            $sauber[] = $slug;
+        }
+    }
+    return $sauber;
+}
+
+/**
+ * Menüpunkte in die feste Reihenfolge bringen und Ausgeschlossenes
+ * weglassen.
+ *
+ * Unbekannte Seiten verschwinden nicht: Sie stehen zwischen dem Inhalt und
+ * den Pflichtseiten, in der Reihenfolge, in der sie hereinkamen. Eine neue
+ * Seite soll auftauchen, ohne dass jemand hier etwas nachträgt —
+ * verschwinden soll sie nur, wenn es jemand so will.
+ */
+function rfat_menu_aufbereiten(array $items) {
+    $reihe = array_flip(rfat_menu_reihenfolge());
+    $aus   = array_flip(rfat_menu_ausgeschlossen());
+
+    // Platz für Unbekanntes: hinter „Mitmachen", vor „Impressum".
+    $unbekannt = isset($reihe['mitmachen']) ? $reihe['mitmachen'] : count($reihe);
+
+    $sortiert = [];
+    foreach ($items as $nr => $item) {
+        $slug = rfat_menu_slug($item['url']);
+        if ($slug !== '' && isset($aus[$slug])) {
+            continue;
+        }
+        $rang = isset($reihe[$slug]) ? $reihe[$slug] * 10 : $unbekannt * 10 + 5;
+        // Der laufende Zaehler haelt die urspruengliche Reihenfolge fest,
+        // wo der Rang gleich ist - unabhaengig davon, ob die Sortierung
+        // der PHP-Fassung stabil ist.
+        $sortiert[] = [$rang, $nr, $item];
+    }
+
+    usort($sortiert, function ($a, $b) {
+        return $a[0] === $b[0] ? $a[1] <=> $b[1] : $a[0] <=> $b[0];
+    });
+
+    $fertig = [];
+    foreach ($sortiert as $eintrag) {
+        $fertig[] = $eintrag[2];
+    }
+    return $fertig;
+}
+
 function rfat_menu_ziele() {
     static $ziele = null;
     if ($ziele !== null) {
         return $ziele;
     }
     $ziele = [];
-    foreach (rfat_get_menu_items() as $item) {
+    // Die rohe Liste: Aus dem Menü des Themes soll auch das verschwinden,
+    // was bei uns ausgeblendet ist — sonst stünde es dort doppelt.
+    foreach (rfat_get_menu_items(true) as $item) {
         $pfad = rfat_url_pfad($item['url']);
         if ($pfad === null) {
             continue;
@@ -4111,10 +4378,10 @@ function rfat_menu_items_from_pages() {
  *
  * @return array<int,array{url:string,label:string}>
  */
-function rfat_get_menu_items() {
+function rfat_get_menu_items($roh = false) {
     $cached = get_transient('rfat_menu_items');
     if (is_array($cached)) {
-        return $cached;
+        return $roh ? $cached : rfat_menu_aufbereiten($cached);
     }
 
     $items = [];
@@ -4183,9 +4450,14 @@ function rfat_get_menu_items() {
         $unique[]   = $item;
     }
 
+    /*
+     * Zwischengespeichert wird die rohe Liste: Reihenfolge und Auswahl
+     * sind eine Einstellung, keine Datenbankabfrage. Wer sie ändert, soll
+     * das Ergebnis sofort sehen und nicht zwölf Stunden warten.
+     */
     set_transient('rfat_menu_items', $unique, 12 * HOUR_IN_SECONDS);
 
-    return $unique;
+    return $roh ? $unique : rfat_menu_aufbereiten($unique);
 }
 
 // Menü-Cache verwerfen, wenn sich Menüs oder Seiten ändern.
