@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.22.0
+Stand: 27.08.2026 · Plugin-Version 1.23.0
 
 ---
 
@@ -518,6 +518,29 @@ Einladung.
   Kontaktdaten bleiben dürfen. Das Häkchen entscheidet über Erreichbarkeit,
   nicht darüber, wie lange Notizen zu einem vergangenen Termin herumliegen.
 
+#### Nachtragen ohne Frage (1.23.0)
+
+Rückfragen gingen bis dahin nur in eine Richtung: Das Antwortfeld erschien
+**nur**, wenn eine Frage offen war. Wer beim Buchen noch nicht wusste, was
+genau kaputt ist, oder wem hinterher einfällt, dass er das Ladegerät
+mitbringt, hatte keinen Weg dorthin.
+
+Jetzt steht auf der Terminseite immer **„Etwas nachtragen?"** — zugeklappt,
+eine Zeile. Aufgeklappt ist es dasselbe Formular wie beim Antworten, und im
+Verlauf landet dasselbe: ein Beitrag des Gasts. Nur die Rückmeldung
+unterscheidet sich, und dafür genügt der Blick, ob vorher eine Frage offen
+stand (`$war_frage`, **vor** dem Anhängen ermittelt — danach ist keine mehr
+offen).
+
+Steht eine Frage offen, fehlt der Kasten: Dann ist das Antwortfeld oben der
+Platz zum Schreiben. Zwei Eingabefelder nebeneinander verwirren nur — und
+der Ablauf war schon zu textlastig, siehe 3.10.
+
+Mitgezogen: Die Mail ans Team heisst je nachdem „Antwort" oder „Notiz",
+die Übersicht zeigt *wartet auf Antwort* / *Antwort da* / *Notiz vom Gast*,
+und die Bestätigungsmail nennt den Weg dorthin („Termin ansehen, etwas
+nachtragen, verschieben oder absagen").
+
 #### Fertige Signal-Nachricht
 
 > **Signal-Links können keinen Text vorbelegen.** Ein Gegenstück zu
@@ -588,6 +611,7 @@ angefasst — dort steht noch der längste Absatz des Ablaufs.
 | 1.20.0 | **Ablehnen-Knopf** in der Übersicht; **Signal-Link** als zweite Eingabeform, damit „In Signal öffnen" wirklich einen Chat öffnet |
 | 1.21.0 | Signal-Link **im Bearbeiten-Bereich nachtragbar**; Link-Prüfung nimmt beide Base64-Spielarten an; Formular fragt zuerst nach dem Link |
 | 1.22.0 | **Gerät merkt sich den Buchungscode**; **Rückfragen** an den Gast mit Antwort auf der Terminseite; fertiger Signal-Nachrichtentext; weniger Text im Ablauf (siehe 3.10) |
+| 1.23.0 | Der Gast kann **von sich aus etwas nachtragen**, nicht nur auf Fragen antworten |
 
 ---
 
