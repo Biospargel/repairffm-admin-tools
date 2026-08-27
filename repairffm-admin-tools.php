@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
- * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail oder Signal-Benutzername) nur freiwillig. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.19.0
+ * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Übersicht mit Zusagen/Ablehnen und Signal-Knopf. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
+ * Version: 1.20.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -213,28 +213,58 @@ function rfat_analyse_booking($post_id) {
 }
 
 /**
- * Einen eingetippten Signal-Benutzernamen prüfen und vereinheitlichen.
+ * Ist dieser gespeicherte Signal-Wert ein Link — oder ein Benutzername?
  *
- * Signal-Benutzernamen bestehen aus einem Namen und einer angehängten
- * Zahl (`maxmuster.42`). Der Name ist 3–32 Zeichen lang, erlaubt sind
+ * Nur der Link öffnet in Signal wirklich einen Chat; beim Benutzernamen
+ * bleibt das Suchen von Hand. An zwei Stellen gebraucht, deshalb hier
+ * einmal und nicht zweimal als Zeichenkettenvergleich.
+ */
+function rfat_signal_ist_link($wert) {
+    return strpos((string) $wert, 'https://signal.me/#eu/') === 0;
+}
+
+/**
+ * Eine eingetippte Signal-Angabe prüfen und vereinheitlichen — Benutzername
+ * oder Signal-Link.
+ *
+ * **Warum beides.** Nur der Link (`https://signal.me/#eu/…`) öffnet auf
+ * Knopfdruck einen Chat. Er enthält keinen Klartext-Namen, sondern eine
+ * Kennung auf Signals Server samt Schlüssel, um den dort verschlüsselt
+ * abgelegten Benutzernamen zu entziffern — aus einem Benutzernamen lässt
+ * er sich deshalb **nicht** zusammenbauen. Wer nur den Namen einträgt,
+ * ist trotzdem erreichbar: Dann muss man ihn in Signal in die Suche
+ * eingeben.
+ *
+ * Benutzernamen bestehen aus einem Namen und einer angehängten Zahl
+ * (`maxmuster.42`). Der Name ist 3–32 Zeichen lang, erlaubt sind
  * Kleinbuchstaben, Ziffern und Unterstriche, und er fängt nicht mit einer
  * Ziffer an; die Zahl dahinter hat mindestens zwei Stellen.
  *
- * Wer den Namen aus Signal kopiert, hat schnell ein `@` oder gleich die
- * ganze Adresse in der Zwischenablage — beides wird abgeräumt, statt es
- * dem Besucher als Fehler vor die Füße zu werfen.
+ * Wer aus Signal kopiert, hat schnell ein `@` in der Zwischenablage —
+ * das wird abgeräumt, statt es dem Besucher als Fehler vor die Füße zu
+ * werfen.
  *
- * @return array{wert:string,fehler:string} wert = '' bei leerer Eingabe
- *         oder bei einem Fehler; fehler = fertige Meldung (HTML).
+ * @return array{wert:string,art:string,fehler:string} art = 'link',
+ *         'name' oder ''; wert = '' bei leerer Eingabe oder bei einem
+ *         Fehler; fehler = fertige Meldung (HTML).
  */
 function rfat_signal_pruefen($roh) {
     $wert = trim((string) $roh);
     if ($wert === '') {
-        return ['wert' => '', 'fehler' => ''];
+        return ['wert' => '', 'art' => '', 'fehler' => ''];
     }
 
-    // Ganze Adresse eingefügt (signal.me/#u/maxmuster.42)? Letztes Stück nehmen.
-    $wert = preg_replace('#^(https?://)?(www\.)?signal\.me/?#i', '', $wert);
+    /*
+     * Zuerst der Link — und der bleibt, wie er ist. Sein hinterer Teil ist
+     * Base64 und damit gross-/kleinschreibungsempfindlich; wer ihn hier
+     * kleinschriebe, machte ihn unbrauchbar.
+     */
+    if (preg_match('#^(?:https?://)?(?:www\.)?signal\.me/\#eu/([A-Za-z0-9_=-]{20,200})$#', $wert, $treffer)) {
+        return ['wert' => 'https://signal.me/#eu/' . $treffer[1], 'art' => 'link', 'fehler' => ''];
+    }
+
+    // Benutzername: hier darf das Beiwerk weg.
+    $wert = preg_replace('#^(?:https?://)?(?:www\.)?signal\.me/?#i', '', $wert);
     $wert = ltrim($wert, "@#/ \t");
     $letzter = strrpos($wert, '/');
     if ($letzter !== false) {
@@ -251,9 +281,10 @@ function rfat_signal_pruefen($roh) {
     if (preg_match('/^\+?[0-9][0-9 ()\/-]{5,}$/', $wert)) {
         return [
             'wert'   => '',
+            'art'    => '',
             'fehler' => 'Das sieht nach einer Telefonnummer aus. Bitte trage deinen '
-                      . '<strong>Signal-Benutzernamen</strong> ein — dann brauchen wir '
-                      . 'deine Nummer nicht. Den Namen findest du in Signal unter '
+                      . '<strong>Signal-Benutzernamen</strong> oder deinen Signal-Link ein — dann '
+                      . 'brauchen wir deine Nummer nicht. Beides findest du in Signal unter '
                       . '<em>Einstellungen &rarr; Profil &rarr; Benutzername</em>.',
         ];
     }
@@ -262,14 +293,16 @@ function rfat_signal_pruefen($roh) {
     if (!preg_match('/^[a-z_][a-z0-9_]{2,31}\.[0-9]{2,9}$/', $wert)) {
         return [
             'wert'   => '',
-            'fehler' => 'Das sieht nicht nach einem Signal-Benutzernamen aus. Er besteht aus '
-                      . 'einem Namen und einer angehängten Zahl, etwa <code>maxmuster.42</code>. '
-                      . 'In Signal steht er unter <em>Einstellungen &rarr; Profil &rarr; '
-                      . 'Benutzername</em>; ein QR-Code oder ein Einladungslink genügt hier nicht.',
+            'art'    => '',
+            'fehler' => 'Das sieht weder nach einem Signal-Benutzernamen noch nach einem '
+                      . 'Signal-Link aus. Der Name besteht aus einem Namen und einer angehängten '
+                      . 'Zahl, etwa <code>maxmuster.42</code>; der Link beginnt mit '
+                      . '<code>https://signal.me/#eu/</code>. Beides steht in Signal unter '
+                      . '<em>Einstellungen &rarr; Profil &rarr; Benutzername</em>.',
         ];
     }
 
-    return ['wert' => $wert, 'fehler' => ''];
+    return ['wert' => $wert, 'art' => 'name', 'fehler' => ''];
 }
 
 function rfat_get_meta_or_empty($post_id) {
@@ -807,16 +840,33 @@ function rfat_render_overview_page() {
                                         <a href="mailto:<?php echo esc_attr($mail); ?>"><?php echo esc_html($mail); ?></a><br />
                                     <?php endif; ?>
                                     <?php if ($signal !== ''): ?>
-                                        <?php
-                                        /*
-                                         * Bewusst kein Link. Signal öffnet einen Chat über
-                                         * einen eigenen Einladungslink, nicht über den
-                                         * Benutzernamen — ein zusammengebauter Link führte
-                                         * ins Leere. In Signal die Suche öffnen und den
-                                         * Namen eingeben, das findet die Person.
-                                         */
-                                        ?>
-                                        Signal: <code><?php echo esc_html($signal); ?></code><br />
+                                        <?php if (rfat_signal_ist_link($signal)): ?>
+                                            <?php
+                                            /*
+                                             * Der Signal-Link öffnet den Chat wirklich —
+                                             * er trägt eine Kennung auf Signals Server samt
+                                             * Schlüssel für den dort verschlüsselt
+                                             * abgelegten Benutzernamen.
+                                             */
+                                            ?>
+                                            <a class="button button-small" style="margin:2px 0;"
+                                               href="<?php echo esc_url($signal); ?>"
+                                               target="_blank" rel="noopener">In Signal öffnen</a><br />
+                                        <?php else: ?>
+                                            <?php
+                                            /*
+                                             * Nur der Benutzername: Daraus lässt sich kein
+                                             * Link bauen (siehe rfat_signal_pruefen), also
+                                             * kein Knopf, der ins Leere führt. Stattdessen
+                                             * den Namen in die Zwischenablage — in Signal
+                                             * oben in die Suche einfügen, das findet die Person.
+                                             */
+                                            ?>
+                                            Signal: <code><?php echo esc_html($signal); ?></code>
+                                            <button type="button" class="button button-small" style="margin-left:4px;"
+                                                    onclick="if(navigator.clipboard){navigator.clipboard.writeText('<?php echo esc_js($signal); ?>');this.textContent='Kopiert \u2713';}">Namen kopieren</button>
+                                            <br />
+                                        <?php endif; ?>
                                     <?php endif; ?>
                                     <span style="color:<?php echo $keep ? '#5b6b62' : '#8a6d1f'; ?>;">
                                         <?php echo $keep
@@ -835,6 +885,21 @@ function rfat_render_overview_page() {
                             <?php if (in_array($status, ['angefragt', 'offen'], true)): ?>
                                 <a class="button button-primary" style="margin-bottom:4px;"
                                    href="<?php echo esc_url(rfat_action_url($p->ID, 'bestaetigen')); ?>">Zusagen</a>
+                                <?php
+                                /*
+                                 * Das Gegenstück zum Zusagen. Der Weg dahinter gibt es
+                                 * schon länger — er steckte bisher nur im Link der
+                                 * Benachrichtigungsmail, in der Übersicht blieb als
+                                 * Absage der Papierkorb, der niemanden benachrichtigt.
+                                 *
+                                 * Kein Formular mit confirm(), sondern derselbe Link
+                                 * wie beim Zusagen: Die Seite dahinter fragt ohnehin
+                                 * noch einmal nach, und dort steht dann Termin und
+                                 * Code dabei — mehr als ein confirm()-Kasten zeigt.
+                                 */
+                                ?>
+                                <a class="button" style="margin-bottom:4px;color:#b3402f;border-color:#b3402f;"
+                                   href="<?php echo esc_url(rfat_action_url($p->ID, 'absagen')); ?>">Ablehnen</a>
                             <?php endif; ?>
                             <button type="button" class="button rfat-toggle" data-target="<?php echo esc_attr($edit_id); ?>">Bearbeiten</button>
                             <form method="post" style="display:inline;" onsubmit="return confirm('Diese Buchung in den Papierkorb verschieben?');">
@@ -1312,9 +1377,10 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                             . 'Zu deinem Termin ist jetzt kein Kontakt mehr gespeichert. '
                             . 'Dein Termin bleibt bestehen.</div>';
                     } else {
+                        $signal_wort = $signal['art'] === 'link' ? 'Signal-Link' : 'Signal-Benutzername';
                         $was = ($email !== '' && $signal['wert'] !== '')
-                            ? 'E-Mail-Adresse und Signal-Benutzername'
-                            : ($email !== '' ? 'E-Mail-Adresse' : 'Signal-Benutzername');
+                            ? 'E-Mail-Adresse und ' . $signal_wort
+                            : ($email !== '' ? 'E-Mail-Adresse' : $signal_wort);
                         $notice = '<div class="rfat-pub-notice rfat-pub-success">Gespeichert: '
                             . $was . '. '
                             . ($keep
@@ -1591,7 +1657,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                        name="rfat_pub_email" placeholder="dein@beispiel.de"
                        value="<?php echo esc_attr($cur_email); ?>" />
 
-                <label class="rfat-pub-feld-label" for="rfat-signal-<?php echo esc_attr($post->ID); ?>">Signal-Benutzername</label>
+                <label class="rfat-pub-feld-label" for="rfat-signal-<?php echo esc_attr($post->ID); ?>">Signal-Benutzername oder -Link</label>
                 <input class="rfat-pub-code-input rfat-pub-mail-input" type="text"
                        id="rfat-signal-<?php echo esc_attr($post->ID); ?>"
                        name="rfat_pub_signal" placeholder="maxmuster.42"
@@ -1599,8 +1665,10 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                        value="<?php echo esc_attr($cur_signal); ?>" />
                 <p class="rfat-pub-feldhinweis">
                     Nicht deine Telefonnummer – der <strong>Benutzername</strong>. Damit
-                    erreichen wir dich in Signal, ohne deine Nummer zu kennen. Du findest ihn
+                    erreichen wir dich in Signal, ohne deine Nummer zu kennen. Beides findest du
                     in Signal unter <em>Einstellungen &rarr; Profil &rarr; Benutzername</em>.
+                    Am einfachsten ist dort <em>Link kopieren</em> – mit dem Link können wir dich
+                    direkt anschreiben, beim Namen müssen wir dich erst suchen.
                 </p>
 
                 <label class="rfat-pub-keep">
@@ -1619,7 +1687,11 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                             Gespeichert:
                             <?php if ($cur_email !== ''): ?><strong><?php echo esc_html($cur_email); ?></strong><?php endif; ?>
                             <?php if ($cur_email !== '' && $cur_signal !== ''): ?>und<?php endif; ?>
-                            <?php if ($cur_signal !== ''): ?><strong>Signal: <?php echo esc_html($cur_signal); ?></strong><?php endif; ?>
+                            <?php if ($cur_signal !== ''): ?><strong>Signal: <?php
+                                // Der Link ist 70 Zeichen lang und sagt nichts — sein
+                                // Vorhandensein ist die ganze Auskunft, die hier zaehlt.
+                                echo rfat_signal_ist_link($cur_signal) ? 'dein Link' : esc_html($cur_signal);
+                            ?></strong><?php endif; ?>
                             —
                             <?php echo $cur_keep
                                 ? 'bleibt gespeichert, bis du es löschst'
@@ -3749,7 +3821,7 @@ define('RFAT_MISSBRAUCH_ABSATZ', '<h2>Schutz vor Mehrfachbuchungen</h2><p>Damit 
  * frisch angelegte Datenschutzseite als auch nachträglich in eine
  * bestehende.
  */
-define('RFAT_SIGNAL_ABSATZ', '<h2>Freiwilliger Kontakt über Signal</h2><p>Statt einer E-Mail-Adresse – oder zusätzlich dazu – kannst du freiwillig deinen <strong>Signal-Benutzernamen</strong> hinterlegen, damit wir dich zu deinem Termin erreichen können. Auch diese Angabe ist <strong>nicht erforderlich</strong>; ohne sie ändert sich nichts. Gespeichert wird ausschließlich der Benutzername – <strong>nicht deine Telefonnummer</strong>. Genau dafür gibt es den Benutzernamen bei Signal: Er macht dich erreichbar, ohne deine Nummer preiszugeben.</p><p><strong>Rechtsgrundlage:</strong> deine Einwilligung (Art. 6 Abs. 1 lit. a DSGVO).</p><p><strong>Speicherdauer:</strong> wie bei der E-Mail-Adresse. Nach deinem Termin wird der Benutzername automatisch gelöscht, bei einer Stornierung sofort. Mit dem Häkchen „Meine Angaben dürfen auch nach dem Termin gespeichert bleiben" bleibt er, bis du ihn selbst wieder löschst.</p><p><strong>Widerruf:</strong> Rufe deinen Termin unter <a href="/termin-abrufen/">Termin abrufen</a> mit deinem Buchungscode auf, leere das Signal-Feld und speichere.</p><p><strong>Empfänger:</strong> Schreiben wir dir über Signal, läuft die Nachricht über den Dienst der Signal Messenger, LLC; deren Bedingungen und deren Ende-zu-Ende-Verschlüsselung gelten dann zusätzlich. Deinen Benutzernamen geben wir nicht an Dritte weiter und verwenden ihn nicht für Werbung.</p>');
+define('RFAT_SIGNAL_ABSATZ', '<h2>Freiwilliger Kontakt über Signal</h2><p>Statt einer E-Mail-Adresse – oder zusätzlich dazu – kannst du freiwillig deinen <strong>Signal-Benutzernamen</strong> oder deinen <strong>Signal-Link</strong> hinterlegen, damit wir dich zu deinem Termin erreichen können. Auch diese Angabe ist <strong>nicht erforderlich</strong>; ohne sie ändert sich nichts. Gespeichert wird ausschließlich, was du selbst einträgst – der Benutzername oder der Link, den Signal für dich erzeugt. <strong>Deine Telefonnummer bekommen wir dabei nicht zu sehen</strong>; genau dafür gibt es Benutzername und Link bei Signal. Der Link enthält keinen Klartext-Namen, sondern eine Kennung, mit der Signal deinen dort verschlüsselt abgelegten Benutzernamen findet.</p><p><strong>Rechtsgrundlage:</strong> deine Einwilligung (Art. 6 Abs. 1 lit. a DSGVO).</p><p><strong>Speicherdauer:</strong> wie bei der E-Mail-Adresse. Nach deinem Termin wird die Angabe automatisch gelöscht, bei einer Stornierung sofort. Mit dem Häkchen „Meine Angaben dürfen auch nach dem Termin gespeichert bleiben" bleibt sie, bis du sie selbst wieder löschst.</p><p><strong>Widerruf:</strong> Rufe deinen Termin unter <a href="/termin-abrufen/">Termin abrufen</a> mit deinem Buchungscode auf, leere das Signal-Feld und speichere.</p><p><strong>Empfänger:</strong> Schreiben wir dir über Signal, läuft die Nachricht über den Dienst der Signal Messenger, LLC; deren Bedingungen und deren Ende-zu-Ende-Verschlüsselung gelten dann zusätzlich. Deine Angabe geben wir nicht an Dritte weiter und verwenden sie nicht für Werbung.</p>');
 
 /**
  * Die Datei(en) der Kennwortsperre im mu-plugins-Verzeichnis finden.
@@ -4031,29 +4103,30 @@ add_action('init', function () {
 }, 31);
 
 /**
- * Den Absatz zum Signal-Kontakt einmalig in die bestehende
- * Datenschutzseite einsetzen — und die dort zitierte Beschriftung des
- * Häkchens nachziehen, die mit dem zweiten Feld ihren Wortlaut geändert hat.
+ * Den Absatz zum Signal-Kontakt in die bestehende Datenschutzseite
+ * einsetzen — oder eine ältere Fassung davon ersetzen — und die dort
+ * zitierte Beschriftung des Häkchens nachziehen, die mit dem zweiten Feld
+ * ihren Wortlaut geändert hat.
+ *
+ * Die Textarbeit steckt in rfat_datenschutz_signal_text(): ohne
+ * Datenbank, damit sie sich prüfen lässt.
  *
  * Gleiche Zurückhaltung wie bei den beiden Absätzen davor: Es wird ein
  * Abschnitt eingefügt und ein Satz berichtigt, sonst nichts angefasst.
  *
  * @return bool Ob der Absatz jetzt (oder schon vorher) drinsteht.
  */
-function rfat_datenschutz_signal_absatz() {
-    $seite = get_page_by_path('datenschutz');
-    if (!$seite) {
-        return false;
-    }
-
-    $alt = (string) $seite->post_content;
+function rfat_datenschutz_signal_text($alt) {
     $neu = str_replace(
         '„Meine Adresse darf auch nach dem Termin gespeichert bleiben"',
         '„Meine Angaben dürfen auch nach dem Termin gespeichert bleiben"',
-        $alt
+        (string) $alt
     );
 
-    if (strpos($neu, 'Freiwilliger Kontakt über Signal') === false) {
+    $kopf   = '<h2>Freiwilliger Kontakt über Signal</h2>';
+    $stelle = strpos($neu, $kopf);
+
+    if ($stelle === false) {
         // Möglichst dicht an den E-Mail-Abschnitt: Was zusammengehört, soll
         // beieinanderstehen und nicht am Seitenende auftauchen.
         $pos = false;
@@ -4063,10 +4136,34 @@ function rfat_datenschutz_signal_absatz() {
                 break;
             }
         }
-        $neu = $pos === false
+        return $pos === false
             ? $neu . "\n" . RFAT_SIGNAL_ABSATZ
             : substr($neu, 0, $pos) . RFAT_SIGNAL_ABSATZ . "\n" . substr($neu, $pos);
     }
+
+    /*
+     * Der Abschnitt steht schon da, stammt aber aus 1.19.0 und kennt den
+     * Signal-Link noch nicht. Ersetzt wird deshalb genau dieser eine
+     * Abschnitt — von seiner Überschrift bis zur nächsten.
+     *
+     * Deshalb auch die Fassungsnummer in der Option statt einer blossen
+     * '1': Die Routine muss nach dem Update ein zweites Mal laufen dürfen,
+     * sonst bliebe der veraltete Text stehen.
+     */
+    $ende = strpos($neu, '<h2>', $stelle + strlen($kopf));
+    return $ende === false
+        ? substr($neu, 0, $stelle) . RFAT_SIGNAL_ABSATZ
+        : substr($neu, 0, $stelle) . RFAT_SIGNAL_ABSATZ . "\n" . substr($neu, $ende);
+}
+
+function rfat_datenschutz_signal_absatz() {
+    $seite = get_page_by_path('datenschutz');
+    if (!$seite) {
+        return false;
+    }
+
+    $alt = (string) $seite->post_content;
+    $neu = rfat_datenschutz_signal_text($alt);
 
     if ($neu !== $alt) {
         wp_update_post(['ID' => $seite->ID, 'post_content' => $neu]);
@@ -4075,12 +4172,18 @@ function rfat_datenschutz_signal_absatz() {
     return true;
 }
 
+/*
+ * Fassung des Signal-Absatzes. Hochzählen, wenn sich der Text ändert —
+ * dann zieht die Routine ihn auf bestehenden Seiten nach.
+ */
+define('RFAT_DS_SIGNAL_FASSUNG', '2');
+
 add_action('init', function () {
-    if (get_option('rfat_ds_signal') === '1') {
+    if (get_option('rfat_ds_signal') === RFAT_DS_SIGNAL_FASSUNG) {
         return;
     }
     if (rfat_datenschutz_signal_absatz()) {
-        update_option('rfat_ds_signal', '1');
+        update_option('rfat_ds_signal', RFAT_DS_SIGNAL_FASSUNG);
     }
 }, 32);
 
