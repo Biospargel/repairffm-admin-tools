@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
- * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast mit Antwort auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.22.0
+ * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
+ * Version: 1.23.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1050,9 +1050,18 @@ function rfat_render_overview_page() {
                             $verlauf_kurz = rfat_dialog_lesen($p->ID);
                             if ($verlauf_kurz):
                                 $letzter = end($verlauf_kurz);
+                                $vorletzter = count($verlauf_kurz) > 1 ? $verlauf_kurz[count($verlauf_kurz) - 2] : null;
+                                if ($letzter['von'] !== 'gast') {
+                                    $hinweis = 'wartet auf Antwort';
+                                } elseif ($vorletzter && $vorletzter['von'] === 'team') {
+                                    $hinweis = 'Antwort da';
+                                } else {
+                                    // Von sich aus geschrieben, ohne dass wir gefragt hätten.
+                                    $hinweis = 'Notiz vom Gast';
+                                }
                                 ?>
                                 <div style="margin-top:6px;font-size:12px;font-weight:600;color:<?php echo $letzter['von'] === 'gast' ? '#1f5a38' : '#8a6d1f'; ?>;">
-                                    <?php echo $letzter['von'] === 'gast' ? 'Antwort da' : 'wartet auf Antwort'; ?>
+                                    <?php echo esc_html($hinweis); ?>
                                 </div>
                             <?php endif; ?>
                         </td>
@@ -1622,10 +1631,15 @@ add_shortcode('rfat_manage_booking', function ($atts) {
     }
 
     /*
-     * Antwort auf eine Rückfrage.
+     * Der Gast schreibt uns: Antwort auf eine Rückfrage — oder von sich
+     * aus eine Notiz.
+     *
+     * Beides derselbe Weg, weil es beim Speichern dasselbe ist: ein
+     * Beitrag des Gasts im Verlauf. Nur die Rückmeldung unterscheidet sich,
+     * und dafür genügt der Blick, ob vorher eine Frage offen stand.
      *
      * Der Code bleibt danach stehen, damit die Seite den Termin gleich
-     * weiter anzeigt — wer gerade geantwortet hat, will nicht auf einem
+     * weiter anzeigt — wer gerade geschrieben hat, will nicht auf einem
      * leeren Eingabefeld landen.
      */
     if (!empty($_POST['rfat_pub_action']) && $_POST['rfat_pub_action'] === 'antwort'
@@ -1640,9 +1654,17 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 $notice = '<div class="rfat-pub-notice rfat-pub-error">Dieser Code wurde nicht gefunden.</div>';
             } elseif (trim((string) $text) === '') {
                 $notice = '<div class="rfat-pub-notice rfat-pub-error">Da stand noch nichts drin.</div>';
-            } elseif (rfat_dialog_anhaengen($match['post']->ID, 'gast', $text)) {
-                rfat_notify_antwort($match['post']->ID);
-                $notice = '<div class="rfat-pub-notice rfat-pub-success">Danke! Deine Antwort ist bei uns.</div>';
+            } else {
+                // Vor dem Anhängen fragen — danach ist keine Frage mehr offen.
+                $war_frage = rfat_dialog_offene_frage($match['post']->ID) !== null;
+                if (rfat_dialog_anhaengen($match['post']->ID, 'gast', $text)) {
+                    rfat_notify_antwort($match['post']->ID, $war_frage);
+                    $notice = '<div class="rfat-pub-notice rfat-pub-success">'
+                            . ($war_frage
+                                ? 'Danke! Deine Antwort ist bei uns.'
+                                : 'Notiert — wir haben es zu deinem Termin geschrieben.')
+                            . '</div>';
+                }
             }
         }
     }
@@ -1767,6 +1789,17 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             }
             .rfat-pub-verlauf-zeile { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: #3d4a43; }
             .rfat-pub-verlauf-zeile.is-gast { color: #1f5a38; }
+
+            /* Zugeklappt eine Zeile, aufgeklappt ein Formular. */
+            .rfat-pub-notiz { margin: 0 0 18px; }
+            .rfat-pub-notiz > summary {
+                cursor: pointer; font-weight: 600; color: #1f5a38; padding: 6px 0;
+            }
+            .rfat-pub-notiz-hilfe { margin: 6px 0 10px; font-size: 13px; color: #5b6b62; line-height: 1.5; }
+            .rfat-pub-notiz textarea {
+                width: 100%; box-sizing: border-box; border: 1px solid #cfd8d2; border-radius: 10px;
+                padding: 10px; font: inherit; margin-bottom: 12px;
+            }
 
             /* Ein Knopf, der wie ein Link aussieht: „nicht merken" ist eine
                Nebensache und darf nicht wie ein Hauptknopf wirken. */
@@ -1930,6 +1963,42 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                         </p>
                     <?php endforeach; ?>
                 </div>
+            <?php endif; ?>
+
+            <?php if (!$offene_frage): ?>
+                <?php
+                /*
+                 * Von sich aus etwas nachtragen — „das Ladegerät bringe ich
+                 * mit", „es ist doch das andere Rad". Beim Buchen weiss man
+                 * das oft noch nicht, und bisher gab es dafür keinen Weg
+                 * ausser einer Mail an uns.
+                 *
+                 * Zugeklappt: Eine Zeile statt eines weiteren Kastens. Der
+                 * Ablauf war schon zu textlastig, das war der Anlass für
+                 * 1.22.0 — ein Formular, das die meisten nicht brauchen,
+                 * darf hier nicht aufgeschlagen liegen.
+                 *
+                 * Steht eine Frage offen, fehlt das hier: Dann ist das
+                 * Antwortfeld oben der Platz zum Schreiben, und zwei
+                 * Eingabefelder nebeneinander verwirren nur.
+                 */
+                ?>
+                <details class="rfat-pub-notiz">
+                    <summary>Etwas nachtragen?</summary>
+                    <p class="rfat-pub-notiz-hilfe">
+                        Zum Beispiel, was genau kaputt ist oder was du mitbringst.
+                        Wir sehen es vor deinem Termin.
+                    </p>
+                    <form method="post">
+                        <?php wp_nonce_field('rfat_pub_antwort_' . $norm_code); ?>
+                        <input type="hidden" name="rfat_pub_action" value="antwort" />
+                        <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($norm_code); ?>" />
+                        <label class="rfat-sr" for="rfat-notiz-<?php echo esc_attr($post->ID); ?>">Deine Notiz</label>
+                        <textarea id="rfat-notiz-<?php echo esc_attr($post->ID); ?>" name="rfat_pub_antwort"
+                                  rows="3" maxlength="1000" placeholder="Deine Notiz"></textarea>
+                        <button type="submit" class="btn">Absenden</button>
+                    </form>
+                </details>
             <?php endif; ?>
 
             <?php
@@ -2798,13 +2867,16 @@ function rfat_signal_nachricht($post_id) {
 }
 
 /**
- * Das Team über eine eingegangene Antwort informieren.
+ * Das Team informieren, wenn der Gast geschrieben hat.
  *
- * Ohne diese Mail bliebe die Antwort in der Übersicht liegen, bis jemand
- * von sich aus nachsieht — und wer eine Frage stellt, sieht nicht dauernd
- * nach.
+ * Ohne diese Mail bliebe es in der Übersicht liegen, bis jemand von sich
+ * aus nachsieht — und wer eine Frage stellt, sieht nicht dauernd nach.
+ * Bei einer Notiz ohne vorherige Frage wüsste es sonst überhaupt niemand.
+ *
+ * @param bool $war_frage Ob eine Rückfrage offen war. Entscheidet nur über
+ *                        den Wortlaut: „Antwort" oder „Notiz".
  */
-function rfat_notify_antwort($post_id) {
+function rfat_notify_antwort($post_id, $war_frage = true) {
     $to = rfat_notify_recipients();
     if (!$to) {
         return;
@@ -2815,14 +2887,15 @@ function rfat_notify_antwort($post_id) {
         return;
     }
 
-    $body = "Zu einer Buchung ist eine Antwort eingegangen.\n\n"
+    $wort = $war_frage ? 'Antwort' : 'Notiz';
+    $body = 'Zu einer Buchung ist eine ' . ($war_frage ? 'Antwort' : 'Notiz') . " eingegangen.\n\n"
           . rfat_booking_summary($post_id) . "\n\n"
-          . "Antwort:\n  " . str_replace("\n", "\n  ", $letzter['text']) . "\n\n"
+          . $wort . ":\n  " . str_replace("\n", "\n  ", $letzter['text']) . "\n\n"
           . "In der Übersicht ansehen:\n"
           . admin_url('edit.php?post_type=rc_booking&page=rfat-overview') . "\n\n"
           . "-- \nAutomatische Nachricht von " . get_bloginfo('name');
 
-    rfat_send_logged($to, sprintf('[%s] Antwort zu einer Buchung', get_bloginfo('name')), $body);
+    rfat_send_logged($to, sprintf('[%s] %s zu einer Buchung', get_bloginfo('name'), $wort), $body);
 }
 
 /**
@@ -2870,7 +2943,7 @@ function rfat_notify_customer($post_id, $was) {
     if ($was === 'bestaetigt') {
         $subject = 'Dein Reparaturtermin ist bestätigt';
         $body    = "Guten Tag,\n\ndein Termin steht:\n\n" . $when . "\nCode: " . $code
-            . "\n\nTermin ansehen, verschieben oder absagen:\n" . $manage;
+            . "\n\nTermin ansehen, etwas nachtragen, verschieben oder absagen:\n" . $manage;
     } else {
         $subject = 'Dein Reparaturtermin konnte nicht stattfinden';
         $body    = "Guten Tag,\n\nleider können wir deinen Termin nicht wahrnehmen:\n\n"
