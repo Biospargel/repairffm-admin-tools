@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 24.08.2026 · Plugin-Version 1.17.1
+Stand: 27.08.2026 · Plugin-Version 1.18.0
 
 ---
 
@@ -291,6 +291,71 @@ Handarbeit ist damit nur noch der Merge. Getestet am 21.08.2026 per
 Bau und Release übersprungen. Der scharfe Pfad läuft beim nächsten
 Versionssprung zum ersten Mal.
 
+### 3.8 Sperre gegen Mehrfachbuchungen (seit 1.18.0)
+
+Die Buchung braucht kein Konto und keinen Namen — das ist die Zusage der
+Seite und bleibt so. Der Preis dafür: Nichts hinderte ein einzelnes Gerät
+daran, in einer Minute **alle** freien Termine wegzubuchen. Vier Samstage mit
+je neun Plätzen sind schnell voll.
+
+**Gezählt werden offene Termine, nicht Buchungsversuche.** Offen heißt:
+veröffentlicht (also nicht storniert) und noch nicht vorbei. Wer absagt,
+bekommt seinen Platz im Kontingent sofort zurück.
+
+> Warum kein Tageszähler? Ein Zähler, der nur hochgeht, bestraft genau den
+> erwünschten Weg — Verschieben heißt bei uns *erst neu buchen, dann alt
+> stornieren* (siehe 3.3), also kurz zwei Buchungen nebeneinander. Und dem
+> Vielbucher nützt er nichts: Um Mitternacht macht er weiter. Deshalb ist das
+> Kontingent auch nach unten auf **2** begrenzt, solange die Sperre an ist.
+
+| Regel | Wert |
+|---|---|
+| Offene Termine je Anschluss | einstellbar, Standard **3**, `0` = aus, sonst 2–20 |
+| Pause zwischen zwei Buchungen | 30 Sekunden (fest, `RFAT_LIMIT_PAUSE`) |
+| Einstellung | Buchungen → Übersicht, im Kasten oben |
+
+**Die IP-Adresse wird nicht gespeichert.** Aus ihr entsteht sofort ein
+HMAC-SHA-256-Prüfwert mit `wp_salt()`, dem geheimen Schlüssel der
+Installation; nur dieser Wert steht als `_rfat_geraet` an der Buchung. Ein
+blanker Hash wäre wertlos — vier Milliarden IPv4-Adressen sind in Minuten
+durchprobiert. Der Prüfwert verschwindet beim Stornieren (`trashed_post`)
+und nach dem Termin (am Cron-Haken von `rfat_cleanup_emails()`).
+Der zugehörige Absatz wird einmalig in die Datenschutzerklärung eingesetzt —
+punktgenau, wie beim Cookie-Absatz in 1.17.0, **nicht** über
+`rc_setup_version` (das schriebe alle fünf Seiten neu).
+
+**Woher die Adresse kommt, ist Sicherheit, nicht Geschmack.** `REMOTE_ADDR`
+zuerst: Steht dort eine öffentliche Adresse, gibt es keinen Proxy davor —
+dann bleiben erfundene `X-Forwarded-For`-Kopfzeilen wirkungslos. Erst wenn
+`REMOTE_ADDR` privat ist (hier der Regelfall: WordPress läuft in Docker
+hinter einem Reverse-Proxy, davor Cloudflare) zählen die Kopfzeilen, und
+zwar `CF-Connecting-IP` zuerst — die überschreibt Cloudflare mit der echten
+Adresse.
+
+> **Fail open, nicht fail closed.** Lässt sich keine öffentliche Adresse
+> bestimmen, wird **nicht** gesperrt. Andersherum wäre es fatal: Reicht der
+> Proxy die Adresse einmal nicht durch, sähen alle Besucher gleich aus — die
+> Sperre würde nach drei Buchungen die ganze Seite dichtmachen. Die Übersicht
+> zeigt deshalb an, welche Adresse der Server gerade sieht und über welche
+> Kopfzeile; steht dort die Warnung, greift die Sperre nicht.
+
+Bei IPv6 wird auf das **/64-Präfix** gekürzt: Dort bekommt ein Anschluss ein
+ganzes Netz, und wer die letzte Stelle hochzählt, hätte sonst beliebig viele
+„Geräte".
+
+**Zwei Kleinigkeiten am Rand, die dazugehören.** Verschieben heißt: mitten
+auf `/termin-abrufen/` neu buchen (3.3). Damit die Begründung einer
+abgewiesenen Buchung dort überhaupt ankommt, gibt `[rfat_manage_booking]`
+jetzt `?fehler=…` aus — und das Buchungs-CSS wird auch auf Seiten mit
+`[rfat_manage_booking]` in den Kopf geschrieben. Vorher stand dort die
+eingeblendete Buchung ungestylt: nackte Links statt Terminknöpfen.
+
+Abgewiesene Versuche werden nur **gezählt** (`rfat_limit_log`: Anzahl,
+Zeitpunkt, Grund) — ohne Adresse, ohne Prüfwert. Sonst ließe sich nicht
+unterscheiden, ob die Sperre nie greift oder ständig zuschlägt.
+
+---
+
 ---
 
 ## 4. Versionshistorie
@@ -332,6 +397,7 @@ Versionssprung zum ersten Mal.
 | 1.16.0 | Buchung führt **direkt** auf `/termin-abrufen/` — Zwischenseite und zweites E-Mail-Formular entfallen (183 Zeilen weniger) |
 | 1.17.0 | **Kennwortsperre entfernt** — das Gate-mu-Plugin wird stillgelegt, obwohl seine Datei nicht im Repo liegt; Cookie-Absatz im Datenschutz richtiggestellt |
 | 1.17.1 | **Seitenrand auf dem Handy zurück** (ging in 1.14.0 verloren); lange Komposita in Überschriften brechen um |
+| 1.18.0 | **Sperre gegen Mehrfachbuchungen** — je Anschluss nur eine begrenzte Zahl offener Termine, IP-Adresse wird dabei nicht gespeichert (siehe 3.8) |
 
 ---
 

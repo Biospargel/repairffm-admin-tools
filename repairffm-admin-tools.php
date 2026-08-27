@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
- * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. Rührt die Buchungslogik des Kern-Plugins selbst nicht an.
- * Version: 1.17.1
+ * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
+ * Version: 1.18.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -77,6 +77,13 @@ function rfat_meta_blocklist() {
         '_wp_page_template', '_thumbnail_id', '_wp_desired_post_slug',
         RFAT_STATUS_META, RFAT_EMAIL_META, RFAT_EMAIL_KEEP_META,
         RFAT_NOTIFIED_META,
+        /*
+         * Der Prüfwert der Buchungssperre. Muss hier stehen: Die Analyse
+         * zeigt jedes unbekannte Feld an - auch auf der öffentlichen Seite
+         * „Termin abrufen". Ein 32-stelliger Prüfwert unter „Dein Termin"
+         * wäre bestenfalls verwirrend.
+         */
+        RFAT_GERAET_META,
     ];
 }
 
@@ -362,6 +369,20 @@ add_action('admin_init', function () {
         exit;
     }
 
+    if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'save_limit') {
+        if (!current_user_can('manage_options')
+            || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_save_limit')) {
+            wp_die('Sicherheitsprüfung fehlgeschlagen.');
+        }
+        $roh = (int) ($_POST['rfat_buchung_limit'] ?? RFAT_LIMIT_DEFAULT);
+        // 0 heißt aus; sonst gilt die Untergrenze aus rfat_buchung_limit().
+        // Autoload an: rfat_buchung_limit() wird bei jeder Buchungsseite
+        // gelesen, eine eigene Abfrage dafür wäre unnötig.
+        update_option(RFAT_LIMIT_OPTION, $roh <= 0 ? 0 : max(2, min(20, $roh)));
+        wp_safe_redirect(add_query_arg('rfat_limit_saved', '1', wp_get_referer() ?: admin_url()));
+        exit;
+    }
+
     if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'check_update') {
         if (!current_user_can('manage_options')
             || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_check_update')) {
@@ -502,6 +523,9 @@ function rfat_render_overview_page() {
         <?php if (isset($_GET['rfat_notify_saved'])): ?>
             <div class="notice notice-success is-dismissible"><p>Empfänger gespeichert.</p></div>
         <?php endif; ?>
+        <?php if (isset($_GET['rfat_limit_saved'])): ?>
+            <div class="notice notice-success is-dismissible"><p>Buchungsgrenze gespeichert.</p></div>
+        <?php endif; ?>
 
         <?php
         $notify_now   = rfat_notify_recipients();
@@ -584,6 +608,52 @@ function rfat_render_overview_page() {
                         <?php endif; ?>
                     <?php endif; ?>
                 </span>
+            </form>
+
+            <?php
+            $limit    = rfat_buchung_limit();
+            $erkannt  = rfat_besucher_ip();
+            $limitlog = get_option(RFAT_LIMIT_LOG);
+            ?>
+            <form method="post" style="margin:10px 0 0;">
+                <?php wp_nonce_field('rfat_save_limit'); ?>
+                <input type="hidden" name="rfat_action" value="save_limit" />
+                <label for="rfat_buchung_limit" style="font-weight:600;">Offene Termine je Anschluss</label>
+                <input type="number" id="rfat_buchung_limit" name="rfat_buchung_limit" min="0" max="20" step="1"
+                       style="width:70px;" value="<?php echo esc_attr($limit); ?>" />
+                <button type="submit" class="button">Speichern</button>
+                <span class="description" style="margin-left:8px;">
+                    <?php if ($limit === 0): ?>
+                        <strong style="color:#b3402f;">Die Sperre ist aus.</strong>
+                        Ein einzelnes Gerät kann alle freien Termine wegbuchen.
+                    <?php else: ?>
+                        Mehr als <strong><?php echo (int) $limit; ?></strong> gleichzeitig offene Termine
+                        kann ein Anschluss nicht buchen. Storniert jemand, wird sein Platz sofort wieder frei.
+                    <?php endif; ?>
+                    <strong>0</strong> schaltet die Sperre ab, weniger als 2 geht nicht
+                    (beim Verschieben existieren kurz zwei Buchungen nebeneinander).
+                </span>
+                <p class="description" style="margin:8px 0 0;">
+                    <?php if ($erkannt['ip'] === ''): ?>
+                        <strong style="color:#b3402f;">Die Sperre greift derzeit nicht:</strong>
+                        Der Server sieht keine öffentliche Adresse des Aufrufers
+                        <?php if ($erkannt['quelle'] !== ''): ?>(nur die interne aus <code><?php echo esc_html($erkannt['quelle']); ?></code>)<?php endif; ?>.
+                        Dann sähen alle Besucher gleich aus, deshalb wird nichts gesperrt — sonst träfe es alle.
+                        Abhilfe: Der Reverse-Proxy vor WordPress muss <code>X-Forwarded-For</code>
+                        bzw. <code>CF-Connecting-IP</code> durchreichen.
+                    <?php else: ?>
+                        Erkannt wird gerade <code><?php echo esc_html($erkannt['ip']); ?></code>
+                        über <code><?php echo esc_html($erkannt['quelle']); ?></code> — das ist deine eigene Adresse.
+                        Gespeichert wird sie nirgends: An der Buchung steht nur ein Prüfwert daraus.
+                    <?php endif; ?>
+                    <?php if (is_array($limitlog) && !empty($limitlog['anzahl'])): ?>
+                        <br />Bisher abgewiesen: <strong><?php echo (int) $limitlog['anzahl']; ?></strong>
+                        <?php if (!empty($limitlog['zeit'])): ?>
+                            (zuletzt <?php echo esc_html(wp_date('d.m.Y H:i', (int) $limitlog['zeit'])); ?><?php
+                                echo $limitlog['grund'] === 'zuschnell' ? ', zu schnell hintereinander' : ', Kontingent voll'; ?>).
+                        <?php endif; ?>
+                    <?php endif; ?>
+                </p>
             </form>
         </div>
 
@@ -1262,6 +1332,19 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         <?php echo rfat_minify_style_tags(ob_get_clean()); ?>
 
         <?php echo $notice; ?>
+
+        <?php
+        /*
+         * Verschieben heißt: erst unten neu buchen, dann den alten Termin
+         * absagen - die Buchung läuft also mitten auf dieser Seite. Schlägt
+         * sie fehl (Termin inzwischen weg, Kontingent voll), landet die
+         * Begründung als ?fehler=... hier. Ohne diese Zeilen fiele sie
+         * stillschweigend unter den Tisch, und der Knopf sähe kaputt aus.
+         */
+        if (!empty($_GET['fehler']) && function_exists('rc_booking_error_html')) {
+            echo rc_booking_error_html();
+        }
+        ?>
 
         <?php if ($unsub_code !== ''): ?>
             <div class="rfat-pub-card">
@@ -3464,6 +3547,15 @@ define('RFAT_GATE_TEXT',   'rfat_gate_datenschutz');
  */
 define('RFAT_COOKIE_ABSATZ', '<p>Diese Website setzt für Besucher:innen keine eigenen Cookies. Für Team-Mitglieder setzt WordPress beim Login in den Verwaltungsbereich technisch notwendige Cookies. Zum technisch notwendigen Cookie des vorgelagerten Dienstes siehe den Abschnitt „Auslieferung über Cloudflare (CDN)". Rechtsgrundlage: § 25 Abs. 2 TDDDG i. V. m. Art. 6 Abs. 1 lit. f DSGVO.</p>');
 
+
+/*
+ * Absatz zur Buchungssperre (Abschnitt MISSBRAUCHSSCHUTZ BEI DER BUCHUNG).
+ * Aus einer Hand wie der Cookie-Absatz: einmal hier, eingesetzt sowohl in
+ * die frisch angelegte Datenschutzseite als auch nachträglich in eine
+ * bestehende.
+ */
+define('RFAT_MISSBRAUCH_ABSATZ', '<h2>Schutz vor Mehrfachbuchungen</h2><p>Damit von einem einzelnen Gerät nicht beliebig viele Termine belegt werden können, prüfen wir beim Abschicken einer Buchung, wie viele <em>offene</em> Termine bereits von derselben Internet-Verbindung gebucht sind. Deine IP-Adresse wird dafür <strong>nicht gespeichert</strong>: Sie wird sofort in einen nicht umkehrbaren Prüfwert umgerechnet (HMAC-SHA-256 mit einem geheimen, nur auf dem Server vorhandenen Schlüssel); allein dieser Wert wird an der Buchung hinterlegt. Auf deine Adresse lässt er sich nicht zurückrechnen, und mit ihm ist auch kein Wiedererkennen über andere Seiten hinweg möglich. Der Prüfwert wird nach deinem Termin automatisch gelöscht, bei einer Stornierung sofort. Rechtsgrundlage ist unser berechtigtes Interesse daran, die knappen ehrenamtlichen Termine für alle nutzbar zu halten (Art. 6 Abs. 1 lit. f DSGVO).</p>');
+
 /**
  * Die Datei(en) der Kennwortsperre im mu-plugins-Verzeichnis finden.
  *
@@ -3691,6 +3783,58 @@ add_action('init', function () {
     update_option(RFAT_GATE_TEXT, '1', false);
 }, 30);
 
+/**
+ * Den Absatz zur Buchungssperre einmalig in die bestehende
+ * Datenschutzseite einsetzen.
+ *
+ * Dieselbe Zurückhaltung wie beim Cookie-Absatz: Es wird ein Abschnitt
+ * eingefügt und sonst nichts angefasst. Das Hochzählen von
+ * `rc_setup_version` schriebe alle fünf Seiten neu und würde eigene
+ * Änderungen im Seiteneditor überschreiben.
+ *
+ * Gesagt werden muss es: Die Sperre verarbeitet die IP-Adresse - auch wenn
+ * sie sie nicht speichert. Eine Erklärung, in der das fehlt, ist unvollständig.
+ *
+ * @return bool Ob der Absatz jetzt (oder schon vorher) drinsteht.
+ */
+function rfat_datenschutz_missbrauch_absatz() {
+    $seite = get_page_by_path('datenschutz');
+    if (!$seite) {
+        return false;
+    }
+
+    $alt = (string) $seite->post_content;
+    if (strpos($alt, 'Schutz vor Mehrfachbuchungen') !== false) {
+        return true;
+    }
+
+    // Vor den Cookies, sonst vor den Server-Protokollen: In beiden Fällen
+    // steht der Absatz damit bei der Buchung und nicht am Ende der Seite.
+    $vor = '<h2>Cookies</h2>';
+    $pos = strpos($alt, $vor);
+    if ($pos === false) {
+        $vor = '<h2>Server-Protokolle</h2>';
+        $pos = strpos($alt, $vor);
+    }
+
+    $neu = $pos === false
+        ? $alt . "\n" . RFAT_MISSBRAUCH_ABSATZ
+        : substr($alt, 0, $pos) . RFAT_MISSBRAUCH_ABSATZ . "\n" . substr($alt, $pos);
+
+    wp_update_post(['ID' => $seite->ID, 'post_content' => $neu]);
+
+    return true;
+}
+
+add_action('init', function () {
+    if (get_option('rfat_ds_missbrauch') === '1') {
+        return;
+    }
+    if (rfat_datenschutz_missbrauch_absatz()) {
+        update_option('rfat_ds_missbrauch', '1');
+    }
+}, 31);
+
 add_action('admin_notices', function () {
     if (!current_user_can('manage_options')) {
         return;
@@ -3724,6 +3868,320 @@ add_action('admin_notices', function () {
         . (get_option('blog_public') ? 'ist aus. ' : '<strong>ist noch gesetzt.</strong> ')
         . 'Impressum, Datenschutz und Startseite auf Aktualität ansehen.</p></div>';
 });
+
+/* =========================================================================
+ * MISSBRAUCHSSCHUTZ BEI DER BUCHUNG
+ *
+ * Die Buchung kommt ohne Konto und ohne Namen aus — genau das ist die
+ * Zusage der Seite. Der Preis dafür: Nichts hindert ein einzelnes Gerät
+ * daran, in einer Minute alle freien Termine wegzubuchen. Vier Samstage
+ * mit je neun Plätzen sind schnell voll, und sie fehlen dann allen
+ * anderen.
+ *
+ * Gezählt werden deshalb die *offenen* Termine derselben Verbindung.
+ * Offen heißt: veröffentlicht (also nicht storniert) und noch nicht
+ * vorbei. Wer absagt, bekommt seinen Platz im Kontingent sofort zurück —
+ * sonst wäre das Verschieben eines Termins (erst neu buchen, dann alt
+ * stornieren, siehe [rfat_manage_booking]) nach wenigen Malen gesperrt.
+ * Genau deshalb ist das Kontingent kein Tageszähler: Ein Zähler, der nur
+ * hochgeht, bestraft das Verschieben und lässt den Vielbucher nach
+ * Mitternacht trotzdem weitermachen.
+ *
+ * Datensparsam bleibt es trotzdem. Die IP-Adresse selbst wird nirgends
+ * gespeichert: Aus ihr entsteht sofort ein HMAC-Prüfwert mit dem
+ * geheimen Schlüssel der Installation. Nur dieser Wert steht an der
+ * Buchung — zurückrechnen lässt er sich nicht — und auch er verschwindet
+ * beim Stornieren und nach dem Termin.
+ * ========================================================================= */
+
+define('RFAT_LIMIT_OPTION', 'rfat_buchung_limit');   // 0 = aus, sonst 2..20
+define('RFAT_LIMIT_DEFAULT', 3);
+define('RFAT_LIMIT_PAUSE', 30);                      // Sekunden zwischen zwei Buchungen
+define('RFAT_GERAET_META', '_rfat_geraet');
+define('RFAT_LIMIT_LOG', 'rfat_limit_log');
+
+/**
+ * Ist das eine Adresse, die einen Besucher draußen im Netz bezeichnet?
+ *
+ * Private Bereiche (10.x, 192.168.x, fc00::/7) und reservierte Adressen
+ * (127.0.0.1, ::1) sind hier ein *Ausschluss*kriterium: Steht so eine
+ * Adresse dran, sitzt in Wahrheit ein Proxy davor und alle Besucher sähen
+ * gleich aus.
+ */
+function rfat_ip_oeffentlich($ip) {
+    return (bool) filter_var(
+        $ip,
+        FILTER_VALIDATE_IP,
+        FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE
+    );
+}
+
+/**
+ * Die Adresse des Besuchers samt der Quelle, aus der sie stammt.
+ *
+ * Die Reihenfolge ist kein Geschmack, sondern Sicherheit: Kopfzeilen wie
+ * X-Forwarded-For darf jeder Aufrufer frei erfinden. Steht in REMOTE_ADDR
+ * bereits eine öffentliche Adresse, gibt es keinen Proxy davor — dann
+ * zählt allein sie, und erfundene Kopfzeilen bleiben wirkungslos.
+ *
+ * Erst wenn REMOTE_ADDR privat ist (bei dieser Seite der Regelfall: der
+ * Server läuft in Docker hinter einem Reverse-Proxy, davor Cloudflare),
+ * müssen die Kopfzeilen ran. CF-Connecting-IP zuerst, denn Cloudflare
+ * überschreibt diese Zeile mit der echten Adresse; X-Forwarded-For steht
+ * hinten an, weil dort mehrere Stationen hintereinander stehen können.
+ *
+ * @return array{ip:string,quelle:string} ip = '' heißt: nicht bestimmbar.
+ */
+function rfat_besucher_ip() {
+    $direkt = isset($_SERVER['REMOTE_ADDR']) ? trim((string) $_SERVER['REMOTE_ADDR']) : '';
+
+    if (rfat_ip_oeffentlich($direkt)) {
+        return ['ip' => $direkt, 'quelle' => 'REMOTE_ADDR'];
+    }
+
+    $kopfzeilen = [
+        'HTTP_CF_CONNECTING_IP' => 'CF-Connecting-IP',
+        'HTTP_X_REAL_IP'        => 'X-Real-IP',
+        'HTTP_X_FORWARDED_FOR'  => 'X-Forwarded-For',
+    ];
+    foreach ($kopfzeilen as $schluessel => $name) {
+        if (empty($_SERVER[$schluessel])) {
+            continue;
+        }
+        foreach (explode(',', (string) $_SERVER[$schluessel]) as $teil) {
+            $teil = trim($teil);
+            if (rfat_ip_oeffentlich($teil)) {
+                return ['ip' => $teil, 'quelle' => $name];
+            }
+        }
+    }
+
+    return ['ip' => '', 'quelle' => $direkt !== '' ? 'REMOTE_ADDR' : ''];
+}
+
+/**
+ * Bei IPv6 auf das /64-Präfix kürzen.
+ *
+ * Ein Anschluss bekommt dort nicht eine Adresse, sondern ein ganzes Netz.
+ * Wer die letzte Stelle hochzählt, hätte sonst beliebig viele „Geräte" —
+ * die Sperre wäre mit einem Handgriff umgangen. Das Präfix bleibt.
+ * IPv4-Adressen gehen unverändert durch.
+ */
+function rfat_ip_gruppe($ip) {
+    if (strpos($ip, ':') === false) {
+        return $ip;
+    }
+    $roh = @inet_pton($ip);
+    if ($roh === false || strlen($roh) !== 16) {
+        return $ip;
+    }
+    $gekuerzt = @inet_ntop(substr($roh, 0, 8) . str_repeat("\0", 8));
+    return $gekuerzt === false ? $ip : $gekuerzt;
+}
+
+/**
+ * Der Prüfwert, unter dem ein Gerät gezählt wird — oder '' , wenn sich
+ * keine Adresse bestimmen lässt.
+ *
+ * HMAC mit dem Schlüssel der Installation, nicht bloß ein Hash: Ein
+ * blanker SHA-256 über eine IP-Adresse ist in Minuten durchprobiert (es
+ * gibt nur gut vier Milliarden IPv4-Adressen). Mit dem geheimen Schlüssel
+ * geht das nicht, und der Wert bleibt trotzdem für dieselbe Adresse immer
+ * derselbe.
+ */
+function rfat_geraete_kennung() {
+    $erkannt = rfat_besucher_ip();
+    if ($erkannt['ip'] === '') {
+        return '';
+    }
+    return substr(hash_hmac('sha256', rfat_ip_gruppe($erkannt['ip']), wp_salt('rfat_geraet')), 0, 32);
+}
+
+/**
+ * Wie viele offene Termine ein Gerät gleichzeitig haben darf.
+ *
+ * Unter 2 wird nicht gestellt, solange die Sperre an ist: Beim
+ * Verschieben eines Termins existieren kurz zwei Buchungen nebeneinander
+ * (erst die neue buchen, dann die alte stornieren). Ein Kontingent von 1
+ * würde genau diesen Weg unmöglich machen.
+ */
+function rfat_buchung_limit() {
+    $wert = get_option(RFAT_LIMIT_OPTION, null);
+    if ($wert === null || $wert === '') {
+        return RFAT_LIMIT_DEFAULT;
+    }
+    $wert = (int) $wert;
+    if ($wert <= 0) {
+        return 0;
+    }
+    return max(2, min(20, $wert));
+}
+
+/**
+ * Offene Buchungen dieses Geräts zählen.
+ *
+ * Nur `publish` — Stornierungen landen im Papierkorb und zählen damit von
+ * selbst nicht mehr mit. Vergangene Termine ebenfalls nicht: Sonst wäre
+ * das Kontingent nach ein paar Monaten dauerhaft aufgebraucht, obwohl
+ * kein einziger Termin mehr aussteht.
+ */
+function rfat_offene_buchungen($kennung) {
+    if ($kennung === '') {
+        return 0;
+    }
+    $ids = get_posts([
+        'post_type'              => 'rc_booking',
+        'post_status'            => 'publish',
+        'numberposts'            => 50,
+        'fields'                 => 'ids',
+        'no_found_rows'          => true,
+        'update_post_term_cache' => false,
+        'meta_key'               => RFAT_GERAET_META,
+        'meta_value'             => $kennung,
+    ]);
+    if (!$ids) {
+        return 0;
+    }
+
+    $heute = current_time('Y-m-d');
+    $offen = 0;
+    foreach ($ids as $pid) {
+        $datum = (string) get_post_meta($pid, '_rc_date', true);
+        // Ohne erkennbares Datum im Zweifel mitzählen.
+        if ($datum === '' || $datum >= $heute) {
+            $offen++;
+        }
+    }
+    return $offen;
+}
+
+/**
+ * Darf dieses Gerät gerade buchen? Gibt den Fehlerschlüssel zurück, unter
+ * dem rc_booking_errors() die Begründung führt — oder '' für "ja".
+ */
+function rfat_buchung_gesperrt($kennung) {
+    $limit = rfat_buchung_limit();
+    if ($limit === 0) {
+        return '';
+    }
+
+    /*
+     * Keine bestimmbare Adresse heißt: durchlassen, nicht sperren.
+     *
+     * Andersherum wäre es fatal. Reicht der Proxy die Adresse einmal nicht
+     * mehr durch, sähen alle Besucher gleich aus — die Sperre würde nach
+     * drei Buchungen die ganze Seite dichtmachen, für alle, und niemand
+     * verstünde warum. Ein zu großzügiger Schutz ist der kleinere Schaden.
+     * Der Hinweis in der Übersicht sagt, wenn es so weit ist.
+     */
+    if ($kennung === '') {
+        return '';
+    }
+
+    $letzte = (int) get_transient('rfat_letzte_' . $kennung);
+    if ($letzte > 0 && (time() - $letzte) < RFAT_LIMIT_PAUSE) {
+        return 'zuschnell';
+    }
+
+    if (rfat_offene_buchungen($kennung) >= $limit) {
+        return 'zuviel';
+    }
+
+    return '';
+}
+
+/**
+ * Nach erfolgreicher Buchung: Prüfwert an die Buchung, Zeitpunkt für die
+ * kurze Pause merken.
+ */
+function rfat_buchung_vermerken($post_id, $kennung) {
+    if ($kennung === '') {
+        return;
+    }
+    update_post_meta($post_id, RFAT_GERAET_META, $kennung);
+    set_transient('rfat_letzte_' . $kennung, time(), max(RFAT_LIMIT_PAUSE, MINUTE_IN_SECONDS));
+}
+
+/**
+ * Abweisungen mitzählen — ohne Adresse, ohne Prüfwert, nur Anzahl und
+ * Zeitpunkt. Sonst lässt sich in der Übersicht nicht unterscheiden, ob die
+ * Sperre nie greift oder ob sie ständig zuschlägt (dann ist sie zu eng).
+ */
+function rfat_limit_vermerken($grund) {
+    $log = get_option(RFAT_LIMIT_LOG);
+    if (!is_array($log)) {
+        $log = ['anzahl' => 0, 'zeit' => 0, 'grund' => ''];
+    }
+    $log['anzahl'] = (int) $log['anzahl'] + 1;
+    $log['zeit']   = time();
+    $log['grund']  = $grund;
+    update_option(RFAT_LIMIT_LOG, $log, false);
+}
+
+/*
+ * Storniert heißt weg: Mit dem Termin entfällt der Zweck, für den der
+ * Prüfwert erhoben wurde. Fürs Zählen wäre das nicht nötig (Papierkorb
+ * ist nicht `publish`), für die Zusage in der Datenschutzerklärung schon.
+ */
+add_action('trashed_post', function ($post_id) {
+    if (get_post_type($post_id) === 'rc_booking') {
+        delete_post_meta($post_id, RFAT_GERAET_META);
+    }
+});
+
+/**
+ * Prüfwerte abgelaufener Termine entfernen.
+ *
+ * Läuft am selben Haken wie das Löschen der E-Mail-Adressen, aber als
+ * eigene Funktion: Die dortige Schleife holt nur Buchungen mit
+ * hinterlegter Adresse — die allermeisten Buchungen haben keine.
+ *
+ * @return int Anzahl der gelöschten Prüfwerte.
+ */
+function rfat_cleanup_geraetekennungen() {
+    $posts = get_posts([
+        'post_type'              => 'rc_booking',
+        'posts_per_page'         => 200,
+        'post_status'            => 'any',
+        'fields'                 => 'ids',
+        'no_found_rows'          => true,
+        'update_post_term_cache' => false,
+        'meta_key'               => RFAT_GERAET_META,
+        'meta_compare'           => 'EXISTS',
+    ]);
+    if (!$posts) {
+        return 0;
+    }
+
+    // time() statt current_time('timestamp') — siehe rfat_cleanup_emails().
+    $cutoff   = time() - RFAT_EMAIL_GRACE;
+    $entfernt = 0;
+
+    foreach ($posts as $post_id) {
+        $analysis = rfat_analyse_booking($post_id);
+        $dt       = $analysis['datetime'];
+
+        if ($dt) {
+            $ts = $dt->getTimestamp();
+        } else {
+            $ts = get_post_time('U', true, $post_id);
+            if (!$ts) {
+                continue;
+            }
+            $ts += 30 * DAY_IN_SECONDS;
+        }
+
+        if ($ts > $cutoff) {
+            continue;
+        }
+
+        delete_post_meta($post_id, RFAT_GERAET_META);
+        $entfernt++;
+    }
+
+    return $entfernt;
+}
+add_action(RFAT_CLEANUP_HOOK, 'rfat_cleanup_geraetekennungen');
 
 /* =========================================================================
  * TERMINBUCHUNG
@@ -3898,11 +4356,25 @@ if (!function_exists('rc_build_slots')) {
      * der eigenen Seite erscheinen.
      */
     function rc_booking_errors() {
+        // Bei abgeschalteter Sperre steht die Meldung nur zur Vollständigkeit
+        // hier; dann darf keine Null im Satz landen.
+        $limit = rfat_buchung_limit();
+        if ($limit < 2) $limit = RFAT_LIMIT_DEFAULT;
         return array(
             'nonce'     => 'Die Sicherheitsprüfung ist fehlgeschlagen. Das passiert meist, wenn die Seite lange offen lag. Bitte den Termin noch einmal auswählen.',
             'weg'       => 'Diesen Termin gibt es nicht mehr. Bitte einen anderen wählen.',
             'belegt'    => 'Dieser Termin ist gerade vergeben worden. Bitte einen anderen wählen.',
             'speichern' => 'Das Speichern hat nicht geklappt. Bitte noch einmal versuchen.',
+            /*
+             * Die Sperre erklärt sich selbst und sagt den Ausweg dazu. Ein
+             * blosses "nicht möglich" liest sich wie ein Fehler der Seite -
+             * dann versucht man es dreimal und schreibt uns dann verärgert.
+             */
+            'zuviel'    => 'Von diesem Anschluss sind bereits ' . $limit . ' Termine'
+                           . ' gebucht - mehr geht gleichzeitig nicht, damit für alle etwas übrig bleibt. '
+                           . 'Sagst du einen davon unter „Termin abrufen" ab, ist sofort wieder ein Platz frei. '
+                           . 'Brauchst du wirklich mehr Termine, schreib uns kurz eine E-Mail.',
+            'zuschnell' => 'Das ging sehr schnell hintereinander. Bitte warte einen Moment und schick die Anfrage dann noch einmal ab.',
         );
     }
 
@@ -3913,6 +4385,19 @@ if (!function_exists('rc_build_slots')) {
     function rc_create_booking($slot_id, $note) {
         $slot = rc_slot_by_id($slot_id);
         if (!$slot) return array('ok' => false, 'err' => 'weg');
+
+        /*
+         * Vor dem Belegtsein prüfen, nicht danach: Wer sein Kontingent
+         * ausgeschöpft hat, soll das erfahren und nicht erst durch alle
+         * freien Termine klicken. Warum überhaupt gedeckelt wird, steht
+         * im Abschnitt MISSBRAUCHSSCHUTZ BEI DER BUCHUNG.
+         */
+        $kennung = rfat_geraete_kennung();
+        $sperre  = rfat_buchung_gesperrt($kennung);
+        if ($sperre !== '') {
+            rfat_limit_vermerken($sperre);
+            return array('ok' => false, 'err' => $sperre);
+        }
 
         $existing = get_posts(array(
             'post_type' => 'rc_booking', 'numberposts' => 1, 'post_status' => 'publish',
@@ -3935,6 +4420,7 @@ if (!function_exists('rc_build_slots')) {
         update_post_meta($pid, '_rc_date', $slot['date']);
         update_post_meta($pid, '_rc_time', $slot['time']);
         if ($note !== '') update_post_meta($pid, '_rc_note', $note);
+        rfat_buchung_vermerken($pid, $kennung);
 
         /*
          * Zusaetzlich zum Hook oben: save_post feuert beim Anlegen, da ist
@@ -4138,11 +4624,19 @@ if (!function_exists('rc_build_slots')) {
         <?php return ob_get_clean();
     }
 
-    /* Nur auf der Buchungsseite ausgeben, und im Kopf statt mitten im Text. */
+    /*
+     * Nur auf der Buchungsseite ausgeben, und im Kopf statt mitten im Text.
+     *
+     * `rfat_manage_booking` zählt mit: Beim Verschieben blendet diese Seite
+     * die komplette Buchung ein (do_shortcode). Ohne die zweite Zeile stünden
+     * dort nackte Links statt Terminknöpfen - und die Fehlermeldung der
+     * Buchungssperre käme ohne ihren roten Kasten an.
+     */
     add_action('wp_head', function () {
         if (!is_singular()) return;
         $content = (string) get_post_field('post_content', get_queried_object_id());
-        if (!has_shortcode($content, 'repairffm_booking')) return;
+        if (!has_shortcode($content, 'repairffm_booking')
+            && !has_shortcode($content, 'rfat_manage_booking')) return;
         ?>
         <?php ob_start(); ?>
         <style>
@@ -4272,6 +4766,7 @@ if (!function_exists('rc_build_slots')) {
     <p><strong>Speicherdauer:</strong> Die Adresse wird nach deinem Termin automatisch gelöscht. Setzt du zusätzlich das Häkchen „Meine Adresse darf auch nach dem Termin gespeichert bleiben", bleibt sie gespeichert, bis du sie selbst wieder löschst. Stornierst du deinen Termin, wird sie sofort gelöscht.</p>
     <p><strong>Widerruf:</strong> Du kannst deine Einwilligung jederzeit und ohne Angabe von Gründen widerrufen. Rufe dazu deinen Termin unter <a href="/termin-abrufen/">Termin abrufen</a> mit deinem Buchungscode auf, leere das E-Mail-Feld und speichere; alternativ nutzt du den Abmeldelink in jeder Nachricht. Die Rechtmäßigkeit der bis zum Widerruf erfolgten Verarbeitung bleibt unberührt.</p>
     <p><strong>Empfänger:</strong> Die Adresse wird nicht an Dritte weitergegeben und nicht für Werbung verwendet. Für den Versand der Nachrichten setzen wir einen E-Mail-Dienstleister als Auftragsverarbeiter ein; dieser wird hier benannt, sobald er eingerichtet ist.</p>
+    <!--RFAT_MISSBRAUCH-->
     <h2>Cookies</h2>
     <!--RFAT_COOKIES-->
     <h2>Server-Protokolle</h2>
@@ -4287,6 +4782,7 @@ if (!function_exists('rc_build_slots')) {
 
         // Cookie-Absatz aus einer Hand — siehe Abschnitt KENNWORTSPERRE ENTFERNEN.
         $dsg = str_replace('<!--RFAT_COOKIES-->', RFAT_COOKIE_ABSATZ, $dsg);
+        $dsg = str_replace('<!--RFAT_MISSBRAUCH-->', RFAT_MISSBRAUCH_ABSATZ, $dsg);
 
         $pages = array(
             'termin-buchen' => array('Termin buchen',
