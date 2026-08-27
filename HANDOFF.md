@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.18.0
+Stand: 27.08.2026 · Plugin-Version 1.19.0
 
 ---
 
@@ -356,6 +356,60 @@ unterscheiden, ob die Sperre nie greift oder ständig zuschlägt.
 
 ---
 
+### 3.9 Freiwilliger Signal-Kontakt (seit 1.19.0)
+
+Neben der E-Mail-Adresse kann auf `/termin-abrufen/` freiwillig ein
+**Signal-Benutzername** hinterlegt werden (`_rfat_signal`). Beide Felder
+stehen in einem Formular unter „Wie wir dich erreichen"; erforderlich ist
+weiterhin keines von beiden.
+
+**Der Benutzername, nicht die Nummer** — das ist der ganze Punkt. Signal hat
+Benutzernamen genau dafür eingeführt: erreichbar sein, ohne die
+Telefonnummer herauszugeben. Für eine Seite, die mit Datensparsamkeit wirbt,
+ist das der einzige vertretbare Weg zu einem schnellen Draht. Wer trotzdem
+eine Telefonnummer eintippt, bekommt deshalb keine allgemeine
+Fehlermeldung, sondern genau diese Erklärung.
+
+`rfat_signal_pruefen()` räumt auf, bevor es ablehnt: führendes `@` und eine
+eingefügte ganze Adresse (`signal.me/#u/name.42`) werden abgeschnitten,
+Großbuchstaben kleingeschrieben. Geprüft wird dann gegen Signals Format —
+Name 3–32 Zeichen aus `a-z`, `0-9`, `_`, nicht mit einer Ziffer beginnend,
+dahinter ein Punkt und mindestens zwei Ziffern.
+
+| Regel | Warum |
+|---|---|
+| Beides in einem Formular, ein Speichern-Knopf | Zwei Kästen mit zwei Knöpfen laden zum halben Speichern ein |
+| Hakt ein Feld, wird **gar nichts** gespeichert | Sonst steht die E-Mail im Kasten, der Signal-Name nicht — und im Formular sieht beides gespeichert aus |
+| Ein Häkchen für beide | Es ist eine Entscheidung über die Kontaktdaten, nicht über den Kanal |
+| Storno löscht beides | Mit dem Termin entfällt der Zweck |
+| Abmeldelink löscht **nur** die E-Mail | Der Link steht in E-Mails und meint auch nur die. Das Häkchen bleibt, solange ein Signal-Name da ist — sonst nähme die Abmeldung von der einen Sache stillschweigend die Entscheidung zur anderen mit |
+
+Im Team sichtbar ist der Name in der Übersicht, dort wo auch die E-Mail
+steht — **bewusst nicht als Link**: Signal öffnet einen Chat über einen
+eigenen Einladungslink, nicht über den Benutzernamen; ein zusammengebauter
+Link führte ins Leere. In Signal die Suche öffnen und den Namen eingeben.
+
+Aufgeräumt wird mit derselben Routine wie bei den Adressen. `meta_query`
+dort fragt seit 1.19.0 mit `OR` nach beiden Feldern — ohne diesen zweiten
+Zweig bliebe ein Benutzername liegen, sobald jemand nur ihn und keine
+E-Mail eingetragen hat. Der Funktionsname `rfat_cleanup_emails()` bleibt
+trotzdem: Er ist zugleich der Name des eingeplanten Cron-Hakens und steckt
+damit in der Datenbank.
+
+Die Datenschutzerklärung bekommt einen eigenen Abschnitt „Freiwilliger
+Kontakt über Signal" — punktgenau eingesetzt wie die beiden Absätze davor.
+Dieselbe Routine zieht den dort zitierten Wortlaut des Häkchens nach, der
+sich mit dem zweiten Feld geändert hat („Meine Adresse darf …" → „Meine
+Angaben dürfen …").
+
+> **Nicht angefasst, aber aufgefallen:** `rfat_notify_email_added()` ist seit
+> jeher definiert und wird nirgends aufgerufen — es würde das Team
+> benachrichtigen, wenn kurz nach der Buchung noch Kontaktdaten nachgetragen
+> werden. Anzuschließen wäre es leicht, es verschickt aber Mails, die bisher
+> niemand bestellt hat. Entscheidung des Betreibers.
+
+---
+
 ---
 
 ## 4. Versionshistorie
@@ -398,6 +452,7 @@ unterscheiden, ob die Sperre nie greift oder ständig zuschlägt.
 | 1.17.0 | **Kennwortsperre entfernt** — das Gate-mu-Plugin wird stillgelegt, obwohl seine Datei nicht im Repo liegt; Cookie-Absatz im Datenschutz richtiggestellt |
 | 1.17.1 | **Seitenrand auf dem Handy zurück** (ging in 1.14.0 verloren); lange Komposita in Überschriften brechen um |
 | 1.18.0 | **Sperre gegen Mehrfachbuchungen** — je Anschluss nur eine begrenzte Zahl offener Termine, IP-Adresse wird dabei nicht gespeichert (siehe 3.8) |
+| 1.19.0 | **Freiwilliger Signal-Benutzername** neben der E-Mail — Benutzername statt Telefonnummer, gleiche Löschregeln (siehe 3.9) |
 
 ---
 

@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
- * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, E-Mail nur freiwillig. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.18.0
+ * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail oder Signal-Benutzername) nur freiwillig. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
+ * Version: 1.19.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -40,6 +40,18 @@ define('RFAT_NONCE_ACTION', 'rfat_save_booking');
  */
 define('RFAT_EMAIL_META', '_rfat_email');
 define('RFAT_EMAIL_KEEP_META', '_rfat_email_keep');
+/*
+ * Freiwilliger Signal-Benutzername (seit 1.19.0).
+ *
+ * Warum der Benutzername und nicht die Telefonnummer: Genau dafuer hat
+ * Signal ihn eingeführt. Wer ihn hier einträgt, ist erreichbar, ohne
+ * seine Nummer herauszugeben — für eine Seite, die mit Datensparsamkeit
+ * wirbt, ist das der einzige vertretbare Weg zu einem schnellen Draht.
+ *
+ * Das Häkchen zur weiteren Speicherung ist dasselbe wie bei der E-Mail:
+ * Es ist eine Entscheidung ueber die Kontaktdaten, nicht ueber den Kanal.
+ */
+define('RFAT_SIGNAL_META', '_rfat_signal');
 define('RFAT_CLEANUP_HOOK', 'rfat_cleanup_emails');
 define('RFAT_NOTIFIED_META', '_rfat_notified');
 define('RFAT_NOTIFY_OPTION', 'rfat_notify_to');
@@ -76,6 +88,7 @@ function rfat_meta_blocklist() {
         '_edit_lock', '_edit_last', '_wp_old_slug', '_wp_old_date',
         '_wp_page_template', '_thumbnail_id', '_wp_desired_post_slug',
         RFAT_STATUS_META, RFAT_EMAIL_META, RFAT_EMAIL_KEEP_META,
+        RFAT_SIGNAL_META,
         RFAT_NOTIFIED_META,
         /*
          * Der Prüfwert der Buchungssperre. Muss hier stehen: Die Analyse
@@ -197,6 +210,66 @@ function rfat_analyse_booking($post_id) {
     $result['other'] = $other;
 
     return $result;
+}
+
+/**
+ * Einen eingetippten Signal-Benutzernamen prüfen und vereinheitlichen.
+ *
+ * Signal-Benutzernamen bestehen aus einem Namen und einer angehängten
+ * Zahl (`maxmuster.42`). Der Name ist 3–32 Zeichen lang, erlaubt sind
+ * Kleinbuchstaben, Ziffern und Unterstriche, und er fängt nicht mit einer
+ * Ziffer an; die Zahl dahinter hat mindestens zwei Stellen.
+ *
+ * Wer den Namen aus Signal kopiert, hat schnell ein `@` oder gleich die
+ * ganze Adresse in der Zwischenablage — beides wird abgeräumt, statt es
+ * dem Besucher als Fehler vor die Füße zu werfen.
+ *
+ * @return array{wert:string,fehler:string} wert = '' bei leerer Eingabe
+ *         oder bei einem Fehler; fehler = fertige Meldung (HTML).
+ */
+function rfat_signal_pruefen($roh) {
+    $wert = trim((string) $roh);
+    if ($wert === '') {
+        return ['wert' => '', 'fehler' => ''];
+    }
+
+    // Ganze Adresse eingefügt (signal.me/#u/maxmuster.42)? Letztes Stück nehmen.
+    $wert = preg_replace('#^(https?://)?(www\.)?signal\.me/?#i', '', $wert);
+    $wert = ltrim($wert, "@#/ \t");
+    $letzter = strrpos($wert, '/');
+    if ($letzter !== false) {
+        $wert = substr($wert, $letzter + 1);
+    }
+    $wert = trim($wert);
+
+    /*
+     * Telefonnummern bekommen eine eigene Meldung. Sonst probiert es
+     * jemand dreimal mit derselben Nummer, ohne zu verstehen, warum sie
+     * abgelehnt wird — und der Sinn des Benutzernamens (die Nummer bleibt
+     * geheim) gehört an genau dieser Stelle gesagt.
+     */
+    if (preg_match('/^\+?[0-9][0-9 ()\/-]{5,}$/', $wert)) {
+        return [
+            'wert'   => '',
+            'fehler' => 'Das sieht nach einer Telefonnummer aus. Bitte trage deinen '
+                      . '<strong>Signal-Benutzernamen</strong> ein — dann brauchen wir '
+                      . 'deine Nummer nicht. Den Namen findest du in Signal unter '
+                      . '<em>Einstellungen &rarr; Profil &rarr; Benutzername</em>.',
+        ];
+    }
+
+    $wert = strtolower($wert);
+    if (!preg_match('/^[a-z_][a-z0-9_]{2,31}\.[0-9]{2,9}$/', $wert)) {
+        return [
+            'wert'   => '',
+            'fehler' => 'Das sieht nicht nach einem Signal-Benutzernamen aus. Er besteht aus '
+                      . 'einem Namen und einer angehängten Zahl, etwa <code>maxmuster.42</code>. '
+                      . 'In Signal steht er unter <em>Einstellungen &rarr; Profil &rarr; '
+                      . 'Benutzername</em>; ein QR-Code oder ein Einladungslink genügt hier nicht.',
+        ];
+    }
+
+    return ['wert' => $wert, 'fehler' => ''];
 }
 
 function rfat_get_meta_or_empty($post_id) {
@@ -724,12 +797,27 @@ function rfat_render_overview_page() {
                              * und ob sie über den Termin hinaus bleiben darf,
                              * hat allein der Besucher entschieden.
                              */
-                            $mail = (string) get_post_meta($p->ID, RFAT_EMAIL_META, true);
-                            if ($mail !== '') :
+                            $mail   = (string) get_post_meta($p->ID, RFAT_EMAIL_META, true);
+                            $signal = (string) get_post_meta($p->ID, RFAT_SIGNAL_META, true);
+                            if ($mail !== '' || $signal !== '') :
                                 $keep = get_post_meta($p->ID, RFAT_EMAIL_KEEP_META, true) === '1';
                                 ?>
                                 <div style="margin-top:6px;font-size:12px;line-height:1.5;">
-                                    <a href="mailto:<?php echo esc_attr($mail); ?>"><?php echo esc_html($mail); ?></a><br />
+                                    <?php if ($mail !== ''): ?>
+                                        <a href="mailto:<?php echo esc_attr($mail); ?>"><?php echo esc_html($mail); ?></a><br />
+                                    <?php endif; ?>
+                                    <?php if ($signal !== ''): ?>
+                                        <?php
+                                        /*
+                                         * Bewusst kein Link. Signal öffnet einen Chat über
+                                         * einen eigenen Einladungslink, nicht über den
+                                         * Benutzernamen — ein zusammengebauter Link führte
+                                         * ins Leere. In Signal die Suche öffnen und den
+                                         * Namen eingeben, das findet die Person.
+                                         */
+                                        ?>
+                                        Signal: <code><?php echo esc_html($signal); ?></code><br />
+                                    <?php endif; ?>
                                     <span style="color:<?php echo $keep ? '#5b6b62' : '#8a6d1f'; ?>;">
                                         <?php echo $keep
                                             ? 'darf gespeichert bleiben'
@@ -1077,6 +1165,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                  */
                 if (get_post_meta($match['post']->ID, RFAT_EMAIL_KEEP_META, true) !== '1') {
                     delete_post_meta($match['post']->ID, RFAT_EMAIL_META);
+                    delete_post_meta($match['post']->ID, RFAT_SIGNAL_META);
                     delete_post_meta($match['post']->ID, RFAT_EMAIL_KEEP_META);
                 }
                 wp_trash_post($match['post']->ID);
@@ -1139,7 +1228,16 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             $um = rfat_find_booking_by_code($ucode);
             if ($um) {
                 delete_post_meta($um['post']->ID, RFAT_EMAIL_META);
-                delete_post_meta($um['post']->ID, RFAT_EMAIL_KEEP_META);
+                /*
+                 * Der Link steht in E-Mails und meint auch nur die E-Mail.
+                 * Ein hinterlegter Signal-Name bleibt deshalb — und mit ihm
+                 * das Häkchen, das ihn vor dem Löschen nach dem Termin
+                 * bewahrt. Ohne diese Bedingung nähme die Abmeldung von der
+                 * einen Sache stillschweigend die Entscheidung zur anderen mit.
+                 */
+                if ((string) get_post_meta($um['post']->ID, RFAT_SIGNAL_META, true) === '') {
+                    delete_post_meta($um['post']->ID, RFAT_EMAIL_KEEP_META);
+                }
             }
             /*
              * Auch bei unbekanntem Code dieselbe Bestaetigung: Sonst
@@ -1164,27 +1262,66 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 $pid   = $match['post']->ID;
                 $email = isset($_POST['rfat_pub_email'])
                     ? sanitize_email(wp_unslash($_POST['rfat_pub_email'])) : '';
+                $signal_roh = isset($_POST['rfat_pub_signal'])
+                    ? sanitize_text_field(wp_unslash($_POST['rfat_pub_signal'])) : '';
                 $keep  = !empty($_POST['rfat_pub_email_keep']);
 
-                if ($email === '') {
-                    // Leeres Feld heißt: wieder löschen.
-                    delete_post_meta($pid, RFAT_EMAIL_META);
-                    delete_post_meta($pid, RFAT_EMAIL_KEEP_META);
-                    $notice = '<div class="rfat-pub-notice rfat-pub-success">Deine E-Mail-Adresse wurde gelöscht. Dein Termin bleibt bestehen.</div>';
-                } elseif (!is_email($email)) {
-                    $notice = '<div class="rfat-pub-notice rfat-pub-error">Das sieht nicht nach einer gültigen E-Mail-Adresse aus.</div>';
+                /*
+                 * Beide Kontaktwege stehen in einem Formular und werden
+                 * deshalb zusammen geprüft. Hakt einer, wird gar nichts
+                 * gespeichert: Sonst landet die E-Mail im Kasten, der
+                 * Signal-Name nicht, und im Formular steht beides — man
+                 * hielte sich für fertig, obwohl die Hälfte fehlt.
+                 */
+                $signal  = rfat_signal_pruefen($signal_roh);
+                $fehler  = [];
+                if ($email !== '' && !is_email($email)) {
+                    $fehler[] = 'Das sieht nicht nach einer gültigen E-Mail-Adresse aus.';
+                }
+                if ($signal['fehler'] !== '') {
+                    $fehler[] = $signal['fehler'];
+                }
+
+                if ($fehler) {
+                    $notice = '<div class="rfat-pub-notice rfat-pub-error">'
+                        . implode('<br />', $fehler)
+                        . '<br /><strong>Es wurde nichts gespeichert.</strong></div>';
                 } else {
-                    update_post_meta($pid, RFAT_EMAIL_META, $email);
-                    if ($keep) {
+                    // Leeres Feld heißt: wieder löschen.
+                    if ($email === '') {
+                        delete_post_meta($pid, RFAT_EMAIL_META);
+                    } else {
+                        update_post_meta($pid, RFAT_EMAIL_META, $email);
+                    }
+                    if ($signal['wert'] === '') {
+                        delete_post_meta($pid, RFAT_SIGNAL_META);
+                    } else {
+                        update_post_meta($pid, RFAT_SIGNAL_META, $signal['wert']);
+                    }
+
+                    // Das Häkchen gilt den Kontaktdaten; ohne Kontaktdaten
+                    // hat es nichts zu bewachen.
+                    if ($keep && ($email !== '' || $signal['wert'] !== '')) {
                         update_post_meta($pid, RFAT_EMAIL_KEEP_META, '1');
                     } else {
                         delete_post_meta($pid, RFAT_EMAIL_KEEP_META);
                     }
-                    $notice = '<div class="rfat-pub-notice rfat-pub-success">Gespeichert. '
-                        . ($keep
-                            ? 'Deine Adresse bleibt gespeichert, bis du sie hier wieder löschst.'
-                            : 'Deine Adresse wird nach dem Termin automatisch gelöscht.')
-                        . '</div>';
+
+                    if ($email === '' && $signal['wert'] === '') {
+                        $notice = '<div class="rfat-pub-notice rfat-pub-success">'
+                            . 'Zu deinem Termin ist jetzt kein Kontakt mehr gespeichert. '
+                            . 'Dein Termin bleibt bestehen.</div>';
+                    } else {
+                        $was = ($email !== '' && $signal['wert'] !== '')
+                            ? 'E-Mail-Adresse und Signal-Benutzername'
+                            : ($email !== '' ? 'E-Mail-Adresse' : 'Signal-Benutzername');
+                        $notice = '<div class="rfat-pub-notice rfat-pub-success">Gespeichert: '
+                            . $was . '. '
+                            . ($keep
+                                ? 'Die Angaben bleiben gespeichert, bis du sie hier wieder löschst.'
+                                : 'Die Angaben werden nach dem Termin automatisch gelöscht.')
+                            . '</div>';
+                    }
                 }
             }
         }
@@ -1270,7 +1407,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 border-radius: 16px;
                 background: #fff;
             }
-            .rfat-pub-mail-label { display: block; font-weight: 700; font-size: 15px; color: #1c2a22; }
+            .rfat-pub-mail-label { display: block; margin: 0; font-weight: 700; font-size: 15px; color: #1c2a22; }
             .rfat-pub-optional {
                 display: inline-block; margin-left: 6px; padding: 2px 9px;
                 border-radius: 999px; background: #e8f1eb; color: #1f5a38;
@@ -1279,6 +1416,11 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             }
             .rfat-pub-mail-intro { margin: 8px 0 12px; font-size: 13px; color: #5b6b62; line-height: 1.5; }
             .rfat-pub-mail-input { max-width: 100%; }
+            /* Zwei Felder untereinander brauchen je eine eigene Beschriftung —
+               ohne sie raet man beim zweiten Kasten, was hineingehoert. */
+            .rfat-pub-feld-label { display: block; font-weight: 600; font-size: 13px; color: #1c2a22; margin: 0 0 4px; }
+            .rfat-pub-mail-input + .rfat-pub-feld-label { margin-top: 12px; }
+            .rfat-pub-feldhinweis { margin: 6px 0 0; font-size: 12.5px; color: #5b6b62; line-height: 1.5; }
             .rfat-pub-keep {
                 display: flex; gap: 10px; align-items: flex-start;
                 margin: 12px 0; font-size: 13px; color: #1c2a22; line-height: 1.5;
@@ -1414,47 +1556,75 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             <?php endif; ?>
 
             <?php
-            $cur_email = (string) get_post_meta($post->ID, RFAT_EMAIL_META, true);
-            $cur_keep  = get_post_meta($post->ID, RFAT_EMAIL_KEEP_META, true) === '1';
+            $cur_email  = (string) get_post_meta($post->ID, RFAT_EMAIL_META, true);
+            $cur_signal = (string) get_post_meta($post->ID, RFAT_SIGNAL_META, true);
+            $cur_keep   = get_post_meta($post->ID, RFAT_EMAIL_KEEP_META, true) === '1';
+            $hat_kontakt = ($cur_email !== '' || $cur_signal !== '');
             ?>
             <form method="post" class="rfat-pub-mail">
                 <?php wp_nonce_field('rfat_pub_email_' . $norm_code); ?>
                 <input type="hidden" name="rfat_pub_action" value="email" />
                 <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($norm_code); ?>" />
 
-                <label class="rfat-pub-mail-label" for="rfat-mail-<?php echo esc_attr($post->ID); ?>">
-                    Benachrichtigung per E-Mail <span class="rfat-pub-optional">freiwillig</span>
-                </label>
+                <?php
+                /*
+                 * Überschrift, kein <label> mehr: Sie steht jetzt über zwei
+                 * Feldern. Als Beschriftung zeigte sie auf das E-Mail-Feld
+                 * und sagte Screenreadern damit das Falsche — beide Felder
+                 * haben ihre eigene.
+                 */
+                ?>
+                <p class="rfat-pub-mail-label">
+                    Wie wir dich erreichen <span class="rfat-pub-optional">freiwillig</span>
+                </p>
                 <p class="rfat-pub-mail-intro">
                     Normalerweise speichern wir zu deinem Termin gar nichts – kein Name,
                     keine Adresse. Wenn du über den weiteren Verlauf informiert werden
-                    möchtest, kannst du hier freiwillig eine E-Mail hinterlassen.
-                    Für den Termin selbst ist das nicht nötig.
+                    möchtest, kannst du hier freiwillig einen Weg hinterlassen – eine
+                    E-Mail, deinen Signal-Benutzernamen oder beides.
+                    Für den Termin selbst ist nichts davon nötig.
                 </p>
 
+                <label class="rfat-pub-feld-label" for="rfat-mail-<?php echo esc_attr($post->ID); ?>">E-Mail</label>
                 <input class="rfat-pub-code-input rfat-pub-mail-input" type="email"
                        id="rfat-mail-<?php echo esc_attr($post->ID); ?>"
                        name="rfat_pub_email" placeholder="dein@beispiel.de"
                        value="<?php echo esc_attr($cur_email); ?>" />
 
+                <label class="rfat-pub-feld-label" for="rfat-signal-<?php echo esc_attr($post->ID); ?>">Signal-Benutzername</label>
+                <input class="rfat-pub-code-input rfat-pub-mail-input" type="text"
+                       id="rfat-signal-<?php echo esc_attr($post->ID); ?>"
+                       name="rfat_pub_signal" placeholder="maxmuster.42"
+                       autocapitalize="none" autocorrect="off" spellcheck="false"
+                       value="<?php echo esc_attr($cur_signal); ?>" />
+                <p class="rfat-pub-feldhinweis">
+                    Nicht deine Telefonnummer – der <strong>Benutzername</strong>. Damit
+                    erreichen wir dich in Signal, ohne deine Nummer zu kennen. Du findest ihn
+                    in Signal unter <em>Einstellungen &rarr; Profil &rarr; Benutzername</em>.
+                </p>
+
                 <label class="rfat-pub-keep">
                     <input type="checkbox" name="rfat_pub_email_keep" value="1"
                            <?php checked($cur_keep); ?> />
                     <span>
-                        Meine Adresse darf auch <strong>nach dem Termin</strong> gespeichert bleiben.
-                        <em>Ohne Haken wird sie nach dem Termin automatisch gelöscht.</em>
+                        Meine Angaben dürfen auch <strong>nach dem Termin</strong> gespeichert bleiben.
+                        <em>Ohne Haken werden sie nach dem Termin automatisch gelöscht.</em>
                     </span>
                 </label>
 
                 <div class="rfat-pub-mail-actions">
-                    <button type="submit" class="btn"><?php echo $cur_email !== '' ? 'Änderung speichern' : 'E-Mail speichern'; ?></button>
-                    <?php if ($cur_email !== ''): ?>
+                    <button type="submit" class="btn"><?php echo $hat_kontakt ? 'Änderung speichern' : 'Kontakt speichern'; ?></button>
+                    <?php if ($hat_kontakt): ?>
                         <span class="rfat-pub-mail-state">
-                            Gespeichert: <strong><?php echo esc_html($cur_email); ?></strong> —
+                            Gespeichert:
+                            <?php if ($cur_email !== ''): ?><strong><?php echo esc_html($cur_email); ?></strong><?php endif; ?>
+                            <?php if ($cur_email !== '' && $cur_signal !== ''): ?>und<?php endif; ?>
+                            <?php if ($cur_signal !== ''): ?><strong>Signal: <?php echo esc_html($cur_signal); ?></strong><?php endif; ?>
+                            —
                             <?php echo $cur_keep
-                                ? 'bleibt gespeichert, bis du sie löschst'
+                                ? 'bleibt gespeichert, bis du es löschst'
                                 : 'wird nach dem Termin gelöscht'; ?>.
-                            Zum Löschen einfach das Feld leeren und speichern.
+                            Zum Löschen einfach das jeweilige Feld leeren und speichern.
                         </span>
                     <?php endif; ?>
                 </div>
@@ -2578,10 +2748,15 @@ function rfat_log_notify($ok, $to, $error = '') {
 define('RFAT_EMAIL_GRACE', DAY_IN_SECONDS);
 
 /**
- * Adressen entfernen, deren Termin vorbei ist und für die keine weitere
- * Speicherung erlaubt wurde.
+ * Kontaktdaten entfernen, deren Termin vorbei ist und für die keine
+ * weitere Speicherung erlaubt wurde — E-Mail wie Signal-Benutzername.
  *
- * @return int Anzahl der gelöschten Adressen.
+ * Der Name bleibt, obwohl seit 1.19.0 mehr als E-Mails darunterfallen:
+ * Er ist zugleich der Name des eingeplanten Cron-Hakens (siehe
+ * RFAT_CLEANUP_HOOK) und steckt damit in der Datenbank. Ein Umbenennen
+ * würde den bestehenden Termin ins Leere laufen lassen.
+ *
+ * @return int Anzahl der Buchungen, die aufgeräumt wurden.
  */
 function rfat_cleanup_emails() {
     $posts = get_posts([
@@ -2590,8 +2765,18 @@ function rfat_cleanup_emails() {
         'post_status'      => 'any',
         'fields'           => 'ids',
         'meta_query'       => [
+            'relation' => 'OR',
             [
                 'key'     => RFAT_EMAIL_META,
+                'compare' => 'EXISTS',
+            ],
+            /*
+             * Seit 1.19.0 darf auch ein Signal-Benutzername hinterlegt
+             * sein — ohne diesen zweiten Zweig bliebe er liegen, sobald
+             * jemand nur ihn und keine E-Mail eingetragen hat.
+             */
+            [
+                'key'     => RFAT_SIGNAL_META,
                 'compare' => 'EXISTS',
             ],
         ],
@@ -2639,6 +2824,7 @@ function rfat_cleanup_emails() {
         }
 
         delete_post_meta($post_id, RFAT_EMAIL_META);
+        delete_post_meta($post_id, RFAT_SIGNAL_META);
         delete_post_meta($post_id, RFAT_EMAIL_KEEP_META);
         $removed++;
     }
@@ -3556,6 +3742,15 @@ define('RFAT_COOKIE_ABSATZ', '<p>Diese Website setzt für Besucher:innen keine e
  */
 define('RFAT_MISSBRAUCH_ABSATZ', '<h2>Schutz vor Mehrfachbuchungen</h2><p>Damit von einem einzelnen Gerät nicht beliebig viele Termine belegt werden können, prüfen wir beim Abschicken einer Buchung, wie viele <em>offene</em> Termine bereits von derselben Internet-Verbindung gebucht sind. Deine IP-Adresse wird dafür <strong>nicht gespeichert</strong>: Sie wird sofort in einen nicht umkehrbaren Prüfwert umgerechnet (HMAC-SHA-256 mit einem geheimen, nur auf dem Server vorhandenen Schlüssel); allein dieser Wert wird an der Buchung hinterlegt. Auf deine Adresse lässt er sich nicht zurückrechnen, und mit ihm ist auch kein Wiedererkennen über andere Seiten hinweg möglich. Der Prüfwert wird nach deinem Termin automatisch gelöscht, bei einer Stornierung sofort. Rechtsgrundlage ist unser berechtigtes Interesse daran, die knappen ehrenamtlichen Termine für alle nutzbar zu halten (Art. 6 Abs. 1 lit. f DSGVO).</p>');
 
+
+/*
+ * Absatz zum freiwilligen Signal-Kontakt (seit 1.19.0). Aus einer Hand
+ * wie die beiden Absätze darüber: einmal hier, eingesetzt sowohl in die
+ * frisch angelegte Datenschutzseite als auch nachträglich in eine
+ * bestehende.
+ */
+define('RFAT_SIGNAL_ABSATZ', '<h2>Freiwilliger Kontakt über Signal</h2><p>Statt einer E-Mail-Adresse – oder zusätzlich dazu – kannst du freiwillig deinen <strong>Signal-Benutzernamen</strong> hinterlegen, damit wir dich zu deinem Termin erreichen können. Auch diese Angabe ist <strong>nicht erforderlich</strong>; ohne sie ändert sich nichts. Gespeichert wird ausschließlich der Benutzername – <strong>nicht deine Telefonnummer</strong>. Genau dafür gibt es den Benutzernamen bei Signal: Er macht dich erreichbar, ohne deine Nummer preiszugeben.</p><p><strong>Rechtsgrundlage:</strong> deine Einwilligung (Art. 6 Abs. 1 lit. a DSGVO).</p><p><strong>Speicherdauer:</strong> wie bei der E-Mail-Adresse. Nach deinem Termin wird der Benutzername automatisch gelöscht, bei einer Stornierung sofort. Mit dem Häkchen „Meine Angaben dürfen auch nach dem Termin gespeichert bleiben" bleibt er, bis du ihn selbst wieder löschst.</p><p><strong>Widerruf:</strong> Rufe deinen Termin unter <a href="/termin-abrufen/">Termin abrufen</a> mit deinem Buchungscode auf, leere das Signal-Feld und speichere.</p><p><strong>Empfänger:</strong> Schreiben wir dir über Signal, läuft die Nachricht über den Dienst der Signal Messenger, LLC; deren Bedingungen und deren Ende-zu-Ende-Verschlüsselung gelten dann zusätzlich. Deinen Benutzernamen geben wir nicht an Dritte weiter und verwenden ihn nicht für Werbung.</p>');
+
 /**
  * Die Datei(en) der Kennwortsperre im mu-plugins-Verzeichnis finden.
  *
@@ -3834,6 +4029,60 @@ add_action('init', function () {
         update_option('rfat_ds_missbrauch', '1');
     }
 }, 31);
+
+/**
+ * Den Absatz zum Signal-Kontakt einmalig in die bestehende
+ * Datenschutzseite einsetzen — und die dort zitierte Beschriftung des
+ * Häkchens nachziehen, die mit dem zweiten Feld ihren Wortlaut geändert hat.
+ *
+ * Gleiche Zurückhaltung wie bei den beiden Absätzen davor: Es wird ein
+ * Abschnitt eingefügt und ein Satz berichtigt, sonst nichts angefasst.
+ *
+ * @return bool Ob der Absatz jetzt (oder schon vorher) drinsteht.
+ */
+function rfat_datenschutz_signal_absatz() {
+    $seite = get_page_by_path('datenschutz');
+    if (!$seite) {
+        return false;
+    }
+
+    $alt = (string) $seite->post_content;
+    $neu = str_replace(
+        '„Meine Adresse darf auch nach dem Termin gespeichert bleiben"',
+        '„Meine Angaben dürfen auch nach dem Termin gespeichert bleiben"',
+        $alt
+    );
+
+    if (strpos($neu, 'Freiwilliger Kontakt über Signal') === false) {
+        // Möglichst dicht an den E-Mail-Abschnitt: Was zusammengehört, soll
+        // beieinanderstehen und nicht am Seitenende auftauchen.
+        $pos = false;
+        foreach (['<h2>Schutz vor Mehrfachbuchungen</h2>', '<h2>Cookies</h2>', '<h2>Server-Protokolle</h2>'] as $marke) {
+            $pos = strpos($neu, $marke);
+            if ($pos !== false) {
+                break;
+            }
+        }
+        $neu = $pos === false
+            ? $neu . "\n" . RFAT_SIGNAL_ABSATZ
+            : substr($neu, 0, $pos) . RFAT_SIGNAL_ABSATZ . "\n" . substr($neu, $pos);
+    }
+
+    if ($neu !== $alt) {
+        wp_update_post(['ID' => $seite->ID, 'post_content' => $neu]);
+    }
+
+    return true;
+}
+
+add_action('init', function () {
+    if (get_option('rfat_ds_signal') === '1') {
+        return;
+    }
+    if (rfat_datenschutz_signal_absatz()) {
+        update_option('rfat_ds_signal', '1');
+    }
+}, 32);
 
 add_action('admin_notices', function () {
     if (!current_user_can('manage_options')) {
@@ -4763,9 +5012,10 @@ if (!function_exists('rc_build_slots')) {
     <h2>Freiwillige Benachrichtigung per E-Mail</h2>
     <p>Du kannst freiwillig eine E-Mail-Adresse hinterlegen, um über die Bestätigung und den weiteren Verlauf deines Termins informiert zu werden. Diese Angabe ist <strong>nicht erforderlich</strong>, um einen Termin zu buchen oder zu verwalten; ohne sie ändert sich nichts.</p>
     <p><strong>Rechtsgrundlage:</strong> deine Einwilligung (Art. 6 Abs. 1 lit. a DSGVO).</p>
-    <p><strong>Speicherdauer:</strong> Die Adresse wird nach deinem Termin automatisch gelöscht. Setzt du zusätzlich das Häkchen „Meine Adresse darf auch nach dem Termin gespeichert bleiben", bleibt sie gespeichert, bis du sie selbst wieder löschst. Stornierst du deinen Termin, wird sie sofort gelöscht.</p>
+    <p><strong>Speicherdauer:</strong> Die Adresse wird nach deinem Termin automatisch gelöscht. Setzt du zusätzlich das Häkchen „Meine Angaben dürfen auch nach dem Termin gespeichert bleiben", bleibt sie gespeichert, bis du sie selbst wieder löschst. Stornierst du deinen Termin, wird sie sofort gelöscht.</p>
     <p><strong>Widerruf:</strong> Du kannst deine Einwilligung jederzeit und ohne Angabe von Gründen widerrufen. Rufe dazu deinen Termin unter <a href="/termin-abrufen/">Termin abrufen</a> mit deinem Buchungscode auf, leere das E-Mail-Feld und speichere; alternativ nutzt du den Abmeldelink in jeder Nachricht. Die Rechtmäßigkeit der bis zum Widerruf erfolgten Verarbeitung bleibt unberührt.</p>
     <p><strong>Empfänger:</strong> Die Adresse wird nicht an Dritte weitergegeben und nicht für Werbung verwendet. Für den Versand der Nachrichten setzen wir einen E-Mail-Dienstleister als Auftragsverarbeiter ein; dieser wird hier benannt, sobald er eingerichtet ist.</p>
+    <!--RFAT_SIGNAL-->
     <!--RFAT_MISSBRAUCH-->
     <h2>Cookies</h2>
     <!--RFAT_COOKIES-->
@@ -4783,10 +5033,11 @@ if (!function_exists('rc_build_slots')) {
         // Cookie-Absatz aus einer Hand — siehe Abschnitt KENNWORTSPERRE ENTFERNEN.
         $dsg = str_replace('<!--RFAT_COOKIES-->', RFAT_COOKIE_ABSATZ, $dsg);
         $dsg = str_replace('<!--RFAT_MISSBRAUCH-->', RFAT_MISSBRAUCH_ABSATZ, $dsg);
+        $dsg = str_replace('<!--RFAT_SIGNAL-->', RFAT_SIGNAL_ABSATZ, $dsg);
 
         $pages = array(
             'termin-buchen' => array('Termin buchen',
-                "<p>Such dir einen freien Termin aus &ndash; ohne Konto und ohne Namen. Du bekommst einen Buchungscode angezeigt. Möchtest du über die Bestätigung benachrichtigt werden, kannst du danach freiwillig eine E-Mail hinterlassen &ndash; nötig ist sie nicht.</p>\n[repairffm_booking]"),
+                "<p>Such dir einen freien Termin aus &ndash; ohne Konto und ohne Namen. Du bekommst einen Buchungscode angezeigt. Möchtest du über die Bestätigung benachrichtigt werden, kannst du danach freiwillig eine E-Mail oder deinen Signal-Benutzernamen hinterlassen &ndash; nötig ist beides nicht.</p>\n[repairffm_booking]"),
             'termine-ort' => array('Termine & Ort',
                 "<p>Wir treffen uns regelmäßig zum gemeinsamen Reparieren. Die aktuell buchbaren Termine findest du unter <a href=\"/termin-buchen/\">Termin buchen</a>.</p>\n<h2>Ort</h2>\n<p><em>[Bitte Veranstaltungsort / Adresse hier eintragen.]</em></p>\n<h2>Was mitbringen?</h2>\n<ul><li>Dein defektes Gerät (Handy, Laptop, IT) oder E-Bike</li><li>Passendes Ladegerät / Netzteil</li><li>Zugangscode bzw. Passwort bei IT-Geräten</li><li>Bei E-Bikes: Akkuschlüssel</li></ul>"),
             'mitmachen' => array('Mitmachen',
