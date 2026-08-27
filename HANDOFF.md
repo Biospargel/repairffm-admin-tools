@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.19.0
+Stand: 27.08.2026 · Plugin-Version 1.20.0
 
 ---
 
@@ -402,6 +402,42 @@ Dieselbe Routine zieht den dort zitierten Wortlaut des Häkchens nach, der
 sich mit dem zweiten Feld geändert hat („Meine Adresse darf …" → „Meine
 Angaben dürfen …").
 
+#### Ablehnen und „In Signal öffnen" (1.20.0)
+
+**Ablehnen** stand in der Übersicht bisher nicht — nur *Zusagen*. Als Absage
+blieb der Papierkorb, und der benachrichtigt niemanden. Der Weg selbst gab
+es längst (`rfat_action_url($id, 'absagen')`), er steckte nur im Link der
+Benachrichtigungsmail. Der Knopf führt auf dieselbe Bestätigungsseite wie
+*Zusagen*: Sie fragt noch einmal nach und zeigt dabei Termin und Code — mehr
+als ein `confirm()`-Kasten leisten kann.
+
+**„In Signal öffnen" ging mit dem Benutzernamen allein nicht.** Der einzige
+Link, der einen Chat öffnet, ist `https://signal.me/#eu/…`. Er enthält
+keinen Klartext-Namen, sondern eine Kennung auf Signals Server und einen
+Schlüssel für den dort **verschlüsselt** abgelegten Benutzernamen — genau
+das ist der Sinn der Sache, und deshalb lässt er sich aus `maxmuster.42`
+nicht zusammenbauen. Ein gebastelter Knopf hätte ins Leere geführt.
+
+Deshalb nimmt das Feld seit 1.20.0 **beides** an, und die Übersicht zeigt,
+was daraus möglich ist:
+
+| Eingetragen | Was das Team bekommt |
+|---|---|
+| Signal-Link | Knopf **„In Signal öffnen"** — ein Klick, Chat offen |
+| Benutzername | Name als `<code>` plus **„Namen kopieren"** — in Signal in die Suche einfügen |
+
+Im Formular steht deshalb der Hinweis, dass *Link kopieren* in Signal der
+einfachere Weg ist. Der Link bleibt bei der Prüfung **unverändert**: Sein
+hinterer Teil ist Base64, wer ihn kleinschriebe, machte ihn unbrauchbar.
+
+Der Datenschutz-Absatz nennt jetzt beide Formen. Die Einsetz-Routine
+ersetzt dafür eine **ältere Fassung** des Abschnitts (Überschrift bis zur
+nächsten Überschrift) statt nur zu prüfen, ob er schon da ist — sonst bliebe
+auf der Seite der Text von 1.19.0 stehen, der den Link nicht kennt. Gesteuert
+über `RFAT_DS_SIGNAL_FASSUNG`: Wer den Text ändert, zählt sie hoch. Die
+Textarbeit steckt in `rfat_datenschutz_signal_text()` — ohne Datenbank,
+damit sie sich prüfen lässt.
+
 > **Nicht angefasst, aber aufgefallen:** `rfat_notify_email_added()` ist seit
 > jeher definiert und wird nirgends aufgerufen — es würde das Team
 > benachrichtigen, wenn kurz nach der Buchung noch Kontaktdaten nachgetragen
@@ -453,6 +489,7 @@ Angaben dürfen …").
 | 1.17.1 | **Seitenrand auf dem Handy zurück** (ging in 1.14.0 verloren); lange Komposita in Überschriften brechen um |
 | 1.18.0 | **Sperre gegen Mehrfachbuchungen** — je Anschluss nur eine begrenzte Zahl offener Termine, IP-Adresse wird dabei nicht gespeichert (siehe 3.8) |
 | 1.19.0 | **Freiwilliger Signal-Benutzername** neben der E-Mail — Benutzername statt Telefonnummer, gleiche Löschregeln (siehe 3.9) |
+| 1.20.0 | **Ablehnen-Knopf** in der Übersicht; **Signal-Link** als zweite Eingabeform, damit „In Signal öffnen" wirklich einen Chat öffnet |
 
 ---
 
