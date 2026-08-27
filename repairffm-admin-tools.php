@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
- * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Übersicht mit Zusagen/Ablehnen und Signal-Knopf. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.21.0
+ * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast mit Antwort auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
+ * Version: 1.22.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -52,6 +52,18 @@ define('RFAT_EMAIL_KEEP_META', '_rfat_email_keep');
  * Es ist eine Entscheidung ueber die Kontaktdaten, nicht ueber den Kanal.
  */
 define('RFAT_SIGNAL_META', '_rfat_signal');
+
+/*
+ * Rückfragen und Antworten zu einer Buchung (seit 1.22.0).
+ *
+ * Eine Liste von Einträgen ['von' => 'team'|'gast', 'text' => ..., 'zeit' => ...].
+ * Warum eine Liste und nicht ein Feld „Frage" und eines „Antwort": Auf eine
+ * Antwort folgt oft die nächste Frage. Zwei Felder müssten sich dann
+ * gegenseitig überschreiben, und der Verlauf wäre weg — gerade der macht
+ * aber vor dem Termin aus, dass beide Seiten wissen, was besprochen ist.
+ */
+define('RFAT_DIALOG_META', '_rfat_dialog');
+define('RFAT_DIALOG_MAX', 20);
 define('RFAT_CLEANUP_HOOK', 'rfat_cleanup_emails');
 define('RFAT_NOTIFIED_META', '_rfat_notified');
 define('RFAT_NOTIFY_OPTION', 'rfat_notify_to');
@@ -89,6 +101,7 @@ function rfat_meta_blocklist() {
         '_wp_page_template', '_thumbnail_id', '_wp_desired_post_slug',
         RFAT_STATUS_META, RFAT_EMAIL_META, RFAT_EMAIL_KEEP_META,
         RFAT_SIGNAL_META,
+        RFAT_DIALOG_META,
         RFAT_NOTIFIED_META,
         /*
          * Der Prüfwert der Buchungssperre. Muss hier stehen: Die Analyse
@@ -311,6 +324,72 @@ function rfat_signal_pruefen($roh) {
     return ['wert' => $wert, 'art' => 'name', 'fehler' => ''];
 }
 
+/**
+ * Den Frage-und-Antwort-Verlauf einer Buchung lesen.
+ *
+ * @return array<int,array{von:string,text:string,zeit:int}>
+ */
+function rfat_dialog_lesen($post_id) {
+    $roh = get_post_meta($post_id, RFAT_DIALOG_META, true);
+    if (!is_array($roh)) {
+        return [];
+    }
+    $sauber = [];
+    foreach ($roh as $eintrag) {
+        if (!is_array($eintrag) || empty($eintrag['text'])) {
+            continue;
+        }
+        $sauber[] = [
+            'von'  => ($eintrag['von'] ?? '') === 'gast' ? 'gast' : 'team',
+            'text' => (string) $eintrag['text'],
+            'zeit' => (int) ($eintrag['zeit'] ?? 0),
+        ];
+    }
+    return $sauber;
+}
+
+/**
+ * Einen Beitrag anhängen. Gibt zurück, ob etwas gespeichert wurde.
+ *
+ * Der Text wird gekürzt und der Verlauf gedeckelt: Das Feld steht in der
+ * Datenbank an einer Buchung, nicht in einem Postfach, und ein Formular im
+ * Netz ohne Obergrenze ist eine Einladung.
+ */
+function rfat_dialog_anhaengen($post_id, $von, $text) {
+    $text = trim(sanitize_textarea_field($text));
+    if ($text === '') {
+        return false;
+    }
+    $verlauf   = rfat_dialog_lesen($post_id);
+    $verlauf[] = [
+        'von'  => $von === 'gast' ? 'gast' : 'team',
+        'text' => mb_substr($text, 0, 1000),
+        'zeit' => time(),
+    ];
+    if (count($verlauf) > RFAT_DIALOG_MAX) {
+        $verlauf = array_slice($verlauf, -RFAT_DIALOG_MAX);
+    }
+    update_post_meta($post_id, RFAT_DIALOG_META, $verlauf);
+    return true;
+}
+
+/**
+ * Steht eine Frage des Teams offen — also ohne Antwort dahinter?
+ *
+ * Genau das entscheidet, ob auf der Terminseite ein Antwortfeld erscheint
+ * und ob in der Übersicht „wartet auf Antwort" steht.
+ *
+ * @return array{von:string,text:string,zeit:int}|null
+ */
+function rfat_dialog_offene_frage($post_id) {
+    $verlauf = rfat_dialog_lesen($post_id);
+    if (!$verlauf) {
+        return null;
+    }
+    $letzter = end($verlauf);
+    return $letzter['von'] === 'team' ? $letzter : null;
+}
+
 function rfat_get_meta_or_empty($post_id) {
     $meta = get_post_meta($post_id);
     return is_array($meta) ? $meta : [];
@@ -473,6 +552,18 @@ add_action('admin_init', function () {
                 delete_post_meta($post_id, RFAT_SIGNAL_META);
             } else {
                 update_post_meta($post_id, RFAT_SIGNAL_META, $signal['wert']);
+            }
+        }
+
+        /*
+         * Rückfrage. Wird angehängt, nicht ersetzt — und nur, wenn wirklich
+         * etwas drinstand: Ein Speichern wegen einer Uhrzeitänderung darf
+         * keine leere Frage in den Verlauf schreiben.
+         */
+        if (!empty($_POST['rfat_frage'])) {
+            $frage = wp_unslash($_POST['rfat_frage']);
+            if (rfat_dialog_anhaengen($post_id, 'team', $frage)) {
+                rfat_notify_frage($post_id, trim(sanitize_textarea_field($frage)));
             }
         }
 
@@ -912,6 +1003,37 @@ function rfat_render_overview_page() {
                                             ? 'darf gespeichert bleiben'
                                             : 'wird nach dem Termin gelöscht'; ?>
                                     </span>
+
+                                    <?php
+                                    /*
+                                     * Fertige Nachricht zum Mitnehmen.
+                                     *
+                                     * Signal-Links können keinen Text vorbelegen — es gibt
+                                     * kein Gegenstück zu WhatsApps ?text=. Näher als
+                                     * „kopieren und Chat öffnen" kommt man nicht heran.
+                                     *
+                                     * In <details>, damit die Tabelle nicht zuwächst: Die
+                                     * Nachricht braucht man beim Schreiben, nicht beim
+                                     * Überfliegen der Liste.
+                                     */
+                                    $msg_id = 'rfat-msg-' . (int) $p->ID;
+                                    ?>
+                                    <details style="margin-top:6px;">
+                                        <summary style="cursor:pointer;">Nachricht vorbereiten</summary>
+                                        <textarea id="<?php echo esc_attr($msg_id); ?>" rows="6"
+                                                  style="width:100%;max-width:420px;margin-top:6px;font-family:inherit;"><?php
+                                            echo esc_textarea(rfat_signal_nachricht($p->ID));
+                                        ?></textarea>
+                                        <div>
+                                            <?php if ($signal !== '' && rfat_signal_ist_link($signal)): ?>
+                                                <button type="button" class="button button-primary button-small"
+                                                        onclick="var t=document.getElementById('<?php echo esc_js($msg_id); ?>');t.select();if(navigator.clipboard){navigator.clipboard.writeText(t.value);}this.textContent='Kopiert \u2713 — in Signal einfügen';window.open('<?php echo esc_js($signal); ?>','_blank','noopener');">Text kopieren &amp; Signal öffnen</button>
+                                            <?php else: ?>
+                                                <button type="button" class="button button-small"
+                                                        onclick="var t=document.getElementById('<?php echo esc_js($msg_id); ?>');t.select();if(navigator.clipboard){navigator.clipboard.writeText(t.value);}this.textContent='Kopiert \u2713';">Nachricht kopieren</button>
+                                            <?php endif; ?>
+                                        </div>
+                                    </details>
                                 </div>
                             <?php endif; ?>
                         </td>
@@ -919,6 +1041,20 @@ function rfat_render_overview_page() {
                             <span style="display:inline-block;padding:3px 10px;border-radius:999px;background:<?php echo esc_attr(rfat_status_color($status)); ?>;color:#fff;font-weight:600;font-size:12px;">
                                 <?php echo esc_html(rfat_status_label($status)); ?>
                             </span>
+                            <?php
+                            /*
+                             * Ob eine Rückfrage offen ist oder eine Antwort wartet,
+                             * gehoert in die Liste — im Bearbeiten-Bereich sieht es
+                             * sonst nur, wer ihn ohnehin aufklappt.
+                             */
+                            $verlauf_kurz = rfat_dialog_lesen($p->ID);
+                            if ($verlauf_kurz):
+                                $letzter = end($verlauf_kurz);
+                                ?>
+                                <div style="margin-top:6px;font-size:12px;font-weight:600;color:<?php echo $letzter['von'] === 'gast' ? '#1f5a38' : '#8a6d1f'; ?>;">
+                                    <?php echo $letzter['von'] === 'gast' ? 'Antwort da' : 'wartet auf Antwort'; ?>
+                                </div>
+                            <?php endif; ?>
                         </td>
                         <td>
                             <?php if (in_array($status, ['angefragt', 'offen'], true)): ?>
@@ -1008,6 +1144,37 @@ function rfat_render_overview_page() {
                                         Nur der <strong>Link</strong> ergibt den Knopf „In Signal öffnen".
                                         Beim blossen Benutzernamen bleibt es beim Kopieren und Suchen —
                                         aus ihm lässt sich kein Link bauen. Leeren und speichern löscht die Angabe.
+                                    </span>
+                                </p>
+
+                                <?php
+                                /*
+                                 * Rückfragen. Der Verlauf steht dabei, sonst fragt man
+                                 * zum dritten Mal dasselbe — und der Gast sieht dieselbe
+                                 * Liste auf seiner Terminseite.
+                                 */
+                                $verlauf = rfat_dialog_lesen($p->ID);
+                                ?>
+                                <?php if ($verlauf): ?>
+                                    <div style="background:#fff;border:1px solid #dcdcde;border-radius:6px;padding:8px 10px;max-width:480px;margin-bottom:10px;">
+                                        <?php foreach ($verlauf as $eintrag): ?>
+                                            <p style="margin:4px 0;font-size:13px;line-height:1.5;">
+                                                <strong><?php echo $eintrag['von'] === 'gast' ? 'Gast' : 'Wir'; ?></strong>
+                                                <span style="color:#787c82;"><?php echo esc_html(wp_date('d.m. H:i', $eintrag['zeit'])); ?></span><br />
+                                                <?php echo nl2br(esc_html($eintrag['text'])); ?>
+                                            </p>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
+
+                                <p>
+                                    <label style="display:block;font-weight:600;margin-bottom:2px;" for="rfat-frage-<?php echo esc_attr($p->ID); ?>">Rückfrage an den Gast</label>
+                                    <textarea id="rfat-frage-<?php echo esc_attr($p->ID); ?>" name="rfat_frage" rows="2"
+                                              style="width:100%;max-width:480px;" placeholder="z. B. Bringst du das Ladegerät mit?"></textarea>
+                                    <span class="description" style="display:block;margin-top:2px;">
+                                        Erscheint auf der Terminseite des Gasts, sobald er sie öffnet — und geht
+                                        als Mail raus, wenn er eine Adresse hinterlassen hat. Bei Signal steht
+                                        die Frage im vorbereiteten Nachrichtentext. Leer lassen ändert nichts.
                                     </span>
                                 </p>
 
@@ -1272,10 +1439,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
      */
     if (!empty($_GET['neu'])) {
         $notice = '<div class="rfat-pub-notice rfat-pub-success">'
-                . '<strong>Termin vorgemerkt.</strong> Bitte warte noch auf unsere '
-                . 'Bestätigung &ndash; erst dann steht er fest. Notiere dir deinen Code '
-                . 'oder speichere den Link weiter unten; damit kommst du jederzeit '
-                . 'wieder hierher.</div>';
+                . '<strong>Termin vorgemerkt.</strong> Wir sehen ihn uns an und melden uns.</div>';
     }
     $found = null;
     $code_value = '';
@@ -1457,6 +1621,32 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         }
     }
 
+    /*
+     * Antwort auf eine Rückfrage.
+     *
+     * Der Code bleibt danach stehen, damit die Seite den Termin gleich
+     * weiter anzeigt — wer gerade geantwortet hat, will nicht auf einem
+     * leeren Eingabefeld landen.
+     */
+    if (!empty($_POST['rfat_pub_action']) && $_POST['rfat_pub_action'] === 'antwort'
+        && !empty($_POST['rfat_pub_code']) && !empty($_POST['_wpnonce'])) {
+        $code_value = sanitize_text_field(wp_unslash($_POST['rfat_pub_code']));
+        if (!wp_verify_nonce($_POST['_wpnonce'], 'rfat_pub_antwort_' . rfat_normalize_code($code_value))) {
+            $notice = '<div class="rfat-pub-notice rfat-pub-error">Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.</div>';
+        } else {
+            $match = rfat_find_booking_by_code($code_value);
+            $text  = isset($_POST['rfat_pub_antwort']) ? wp_unslash($_POST['rfat_pub_antwort']) : '';
+            if (!$match) {
+                $notice = '<div class="rfat-pub-notice rfat-pub-error">Dieser Code wurde nicht gefunden.</div>';
+            } elseif (trim((string) $text) === '') {
+                $notice = '<div class="rfat-pub-notice rfat-pub-error">Da stand noch nichts drin.</div>';
+            } elseif (rfat_dialog_anhaengen($match['post']->ID, 'gast', $text)) {
+                rfat_notify_antwort($match['post']->ID);
+                $notice = '<div class="rfat-pub-notice rfat-pub-success">Danke! Deine Antwort ist bei uns.</div>';
+            }
+        }
+    }
+
     // Lookup per Formular.
     if (!empty($_POST['rfat_pub_action']) && $_POST['rfat_pub_action'] === 'lookup' && !empty($_POST['rfat_pub_code'])) {
         $code_value = sanitize_text_field(wp_unslash($_POST['rfat_pub_code']));
@@ -1551,6 +1741,44 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             .rfat-pub-feld-label { display: block; font-weight: 600; font-size: 13px; color: #1c2a22; margin: 0 0 4px; }
             .rfat-pub-mail-input + .rfat-pub-feld-label { margin-top: 12px; }
             .rfat-pub-feldhinweis { margin: 6px 0 0; font-size: 12.5px; color: #5b6b62; line-height: 1.5; }
+
+            /* Beschriftung nur fuer Screenreader — das Theme bringt dafuer
+               nichts mit, also hier. clip-path statt display:none: Verstecktes
+               liest kein Screenreader vor. */
+            .rfat-sr {
+                position: absolute; width: 1px; height: 1px; overflow: hidden;
+                clip-path: inset(50%); white-space: nowrap;
+            }
+
+            /* Rueckfrage: der auffaelligste Kasten der Seite. Wer hier
+               landet, weil wir etwas wissen wollen, soll die Frage sehen
+               und nicht suchen. */
+            .rfat-pub-frage {
+                background: #fbf2e2; border-left: 4px solid #c08a1e; border-radius: 12px;
+                padding: 16px 18px; margin: 0 0 18px;
+            }
+            .rfat-pub-frage-text { margin: 4px 0 12px; font-size: 17px; line-height: 1.5; color: #1c2a22; }
+            .rfat-pub-frage textarea {
+                width: 100%; box-sizing: border-box; border: 1px solid #cfd8d2; border-radius: 10px;
+                padding: 10px; font: inherit; margin-bottom: 12px;
+            }
+            .rfat-pub-verlauf {
+                background: #f4f6f4; border-radius: 12px; padding: 14px 16px; margin: 0 0 18px;
+            }
+            .rfat-pub-verlauf-zeile { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: #3d4a43; }
+            .rfat-pub-verlauf-zeile.is-gast { color: #1f5a38; }
+
+            /* Ein Knopf, der wie ein Link aussieht: „nicht merken" ist eine
+               Nebensache und darf nicht wie ein Hauptknopf wirken. */
+            .rfat-pub-linkknopf {
+                background: none; border: 0; padding: 0; font: inherit; font-size: inherit;
+                color: #1f5a38; text-decoration: underline; cursor: pointer;
+            }
+            #rfat-meine-termine { margin: 0 0 22px; }
+            /* Auf `hidden` allein ist kein Verlass: Manche Themes setzen für
+               Absätze und Container ein eigenes `display` und stechen die
+               Regel des Browsers damit aus. */
+            .rfat-pub-share-hint[hidden], #rfat-meine-termine[hidden] { display: none; }
             .rfat-pub-keep {
                 display: flex; gap: 10px; align-items: flex-start;
                 margin: 12px 0; font-size: 13px; color: #1c2a22; line-height: 1.5;
@@ -1639,6 +1867,19 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             </div>
 
         <?php elseif (!$found): ?>
+            <?php
+            /*
+             * Was dieses Gerät sich gemerkt hat — gefüllt vom Skript unten.
+             *
+             * Der Auslöser dafür stand im Wohnzimmer: Eine Testbucherin hat
+             * den Code nicht notiert und kam nie wieder an ihren Termin. Der
+             * Code ist das einzige Credential, wir speichern ja weder Namen
+             * noch Konto. Also merkt sich ihn jetzt der Browser, auf dem
+             * gebucht wurde — nur dort, und nur für die Person selbst.
+             */
+            ?>
+            <div id="rfat-meine-termine" hidden></div>
+
             <form method="post">
                 <input type="hidden" name="rfat_pub_action" value="lookup" />
                 <p>
@@ -1655,12 +1896,49 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             <?php echo rfat_public_booking_details_html($post, $analysis); ?>
 
             <?php
+            /*
+             * Rückfragen zuerst — vor Link, Kontakt und allem anderen.
+             * Wer hier landet, weil wir etwas wissen wollen, soll die Frage
+             * sehen und nicht suchen müssen.
+             */
+            $offene_frage = rfat_dialog_offene_frage($post->ID);
+            $verlauf      = rfat_dialog_lesen($post->ID);
+            ?>
+            <?php if ($offene_frage): ?>
+                <div class="rfat-pub-frage">
+                    <p class="rfat-pub-eyebrow">Frage an dich</p>
+                    <p class="rfat-pub-frage-text"><?php echo nl2br(esc_html($offene_frage['text'])); ?></p>
+                    <form method="post">
+                        <?php wp_nonce_field('rfat_pub_antwort_' . $norm_code); ?>
+                        <input type="hidden" name="rfat_pub_action" value="antwort" />
+                        <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($norm_code); ?>" />
+                        <label class="rfat-sr" for="rfat-antwort-<?php echo esc_attr($post->ID); ?>">Deine Antwort</label>
+                        <textarea id="rfat-antwort-<?php echo esc_attr($post->ID); ?>" name="rfat_pub_antwort"
+                                  rows="3" maxlength="1000" placeholder="Deine Antwort"></textarea>
+                        <button type="submit" class="btn">Antwort senden</button>
+                    </form>
+                </div>
+            <?php endif; ?>
+
+            <?php if ($verlauf && !$offene_frage): ?>
+                <div class="rfat-pub-verlauf">
+                    <p class="rfat-pub-eyebrow">Bisher besprochen</p>
+                    <?php foreach ($verlauf as $eintrag): ?>
+                        <p class="rfat-pub-verlauf-zeile <?php echo $eintrag['von'] === 'gast' ? 'is-gast' : ''; ?>">
+                            <strong><?php echo $eintrag['von'] === 'gast' ? 'Du' : 'Wir'; ?>:</strong>
+                            <?php echo nl2br(esc_html($eintrag['text'])); ?>
+                        </p>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+
+            <?php
             // Direktlink auf genau diesen Termin — zum Speichern statt Abtippen.
             $share_url = add_query_arg('code', $norm_code, get_permalink());
             ?>
-            <div class="rfat-pub-share">
+            <div class="rfat-pub-share" data-rfat-code="<?php echo esc_attr($norm_code); ?>">
                 <label class="rfat-pub-share-label" for="rfat-share-<?php echo esc_attr($post->ID); ?>">
-                    Dein persönlicher Link — damit kommst du jederzeit wieder hierher:
+                    Dein Code <strong><?php echo esc_html($norm_code); ?></strong> — hier ist er als Link:
                 </label>
                 <div class="rfat-pub-share-row">
                     <input class="rfat-pub-share-url" type="text" readonly
@@ -1670,18 +1948,20 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                     <button type="button" class="btn rfat-pub-copy"
                             data-target="rfat-share-<?php echo esc_attr($post->ID); ?>">Kopieren</button>
                 </div>
-                <p class="rfat-pub-share-hint">
-                    Bewahre ihn gut auf: Wir speichern zu deinem Termin weder Namen
-                    noch Konto, deshalb ist er zusammen mit deinem Code
-                    <?php echo esc_html($norm_code); ?> dein Weg zurück.
-                </p>
+                <?php
+                /*
+                 * Der Hinweis kommt aus dem Skript, nicht von hier: Er stimmt
+                 * nur, wenn der Browser den Code auch wirklich behalten hat.
+                 * Im privaten Fenster oder mit gesperrtem Speicher tut er das
+                 * nicht — dann soll hier auch nichts stehen.
+                 */
+                ?>
+                <p class="rfat-pub-share-hint" id="rfat-gemerkt-<?php echo esc_attr($post->ID); ?>" hidden></p>
             </div>
 
             <?php if (rfat_get_status($post->ID) === 'angefragt'): ?>
                 <div class="rfat-pub-notice" style="background:#fbf2e2;color:#7a5510;">
-                    <strong>Noch nicht bestätigt.</strong> Deine Anfrage ist bei uns eingegangen —
-                    wir melden uns, sobald wir sie angesehen haben. Komm bitte erst vorbei,
-                    wenn hier <em>Bestätigt</em> steht.
+                    <strong>Noch nicht bestätigt.</strong> Wir sehen uns deine Anfrage an und melden uns.
                 </div>
             <?php endif; ?>
 
@@ -1708,11 +1988,8 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                     Wie wir dich erreichen <span class="rfat-pub-optional">freiwillig</span>
                 </p>
                 <p class="rfat-pub-mail-intro">
-                    Normalerweise speichern wir zu deinem Termin gar nichts – kein Name,
-                    keine Adresse. Wenn du über den weiteren Verlauf informiert werden
-                    möchtest, kannst du hier freiwillig einen Weg hinterlassen – eine
-                    E-Mail, deinen Signal-Benutzernamen oder beides.
-                    Für den Termin selbst ist nichts davon nötig.
+                    Freiwillig – ohne Angabe ändert sich nichts. Damit melden wir uns,
+                    wenn es etwas zu klären gibt oder dein Termin bestätigt ist.
                 </p>
 
                 <label class="rfat-pub-feld-label" for="rfat-mail-<?php echo esc_attr($post->ID); ?>">E-Mail</label>
@@ -1728,20 +2005,17 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                        autocapitalize="none" autocorrect="off" spellcheck="false"
                        value="<?php echo esc_attr($cur_signal); ?>" />
                 <p class="rfat-pub-feldhinweis">
-                    Am besten dein <strong>Signal-Link</strong>: In Signal unter
-                    <em>Einstellungen &rarr; Profil &rarr; Benutzername</em> auf
-                    <em>Link kopieren</em> tippen und hier einfügen – damit können wir dich
-                    direkt anschreiben. Dein Benutzername (etwa <code>maxmuster.42</code>) geht
-                    auch, dann müssen wir dich erst suchen.
-                    Deine <strong>Telefonnummer brauchen wir in keinem Fall</strong>.
+                    Am besten der <strong>Signal-Link</strong> (in Signal:
+                    <em>Einstellungen &rarr; Profil &rarr; Benutzername &rarr; Link kopieren</em>).
+                    Der Benutzername geht auch. Deine <strong>Telefonnummer brauchen wir nicht</strong>.
                 </p>
 
                 <label class="rfat-pub-keep">
                     <input type="checkbox" name="rfat_pub_email_keep" value="1"
                            <?php checked($cur_keep); ?> />
                     <span>
-                        Meine Angaben dürfen auch <strong>nach dem Termin</strong> gespeichert bleiben.
-                        <em>Ohne Haken werden sie nach dem Termin automatisch gelöscht.</em>
+                        Auch <strong>nach dem Termin</strong> gespeichert lassen.
+                        <em>Ohne Haken werden die Angaben danach gelöscht.</em>
                     </span>
                 </label>
 
@@ -1810,6 +2084,106 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         <?php endif; ?>
 
         <script>
+        /*
+         * Dieses Gerät merkt sich die Buchungscodes, die hier angezeigt
+         * wurden — nur im Browser, nichts davon geht an den Server.
+         *
+         * Grund: Der Code ist das einzige Credential. Wer ihn nicht
+         * notiert, kommt nie wieder an seinen Termin. Genau das ist beim
+         * Ausprobieren passiert.
+         *
+         * Alles in try/catch: Im privaten Fenster und bei gesperrtem
+         * Speicher wirft schon der Zugriff. Dann bleibt es eben beim
+         * Abtippen des Codes — kaputt gehen darf die Seite davon nicht.
+         */
+        (function () {
+            var SCHLUESSEL = 'rfat_codes';
+            var MAX = 5;
+
+            function lesen() {
+                try {
+                    var roh = window.localStorage.getItem(SCHLUESSEL);
+                    var liste = roh ? JSON.parse(roh) : [];
+                    return Array.isArray(liste) ? liste.filter(function (c) {
+                        return typeof c === 'string' && /^RC-[A-Z0-9]{3,10}$/.test(c);
+                    }) : [];
+                } catch (e) { return []; }
+            }
+
+            function schreiben(liste) {
+                try {
+                    window.localStorage.setItem(SCHLUESSEL, JSON.stringify(liste.slice(0, MAX)));
+                    return true;
+                } catch (e) { return false; }
+            }
+
+            function merken(code) {
+                var liste = lesen().filter(function (c) { return c !== code; });
+                liste.unshift(code);
+                return schreiben(liste);
+            }
+
+            function vergessen() {
+                try { window.localStorage.removeItem(SCHLUESSEL); } catch (e) { /* dann eben nicht */ }
+            }
+
+            /* Angezeigter Termin: merken und sagen, dass gemerkt wurde. */
+            var karte = document.querySelector('.rfat-pub-share[data-rfat-code]');
+            if (karte) {
+                var code = karte.getAttribute('data-rfat-code');
+                var hinweis = karte.querySelector('.rfat-pub-share-hint');
+                if (code && merken(code) && hinweis) {
+                    hinweis.textContent = 'Dieses Gerät merkt sich den Termin — beim nächsten Besuch steht er hier oben. ';
+                    var weg = document.createElement('button');
+                    weg.type = 'button';
+                    weg.className = 'rfat-pub-linkknopf';
+                    weg.textContent = 'nicht merken';
+                    weg.addEventListener('click', function () {
+                        vergessen();
+                        hinweis.textContent = 'Gut, dieses Gerät merkt sich nichts mehr. Bewahre deinen Code auf.';
+                    });
+                    hinweis.appendChild(weg);
+                    hinweis.hidden = false;
+                }
+            }
+
+            /* Kein Termin angezeigt: anbieten, was gemerkt ist. */
+            var kasten = document.getElementById('rfat-meine-termine');
+            if (kasten) {
+                var gemerkt = lesen();
+                if (gemerkt.length) {
+                    var titel = document.createElement('p');
+                    titel.className = 'rfat-pub-eyebrow';
+                    titel.textContent = gemerkt.length > 1 ? 'Deine Termine auf diesem Gerät' : 'Dein Termin auf diesem Gerät';
+                    kasten.appendChild(titel);
+
+                    gemerkt.forEach(function (c) {
+                        var a = document.createElement('a');
+                        a.className = 'btn';
+                        a.style.marginRight = '8px';
+                        a.href = '?code=' + encodeURIComponent(c);
+                        a.textContent = c + ' anzeigen';
+                        kasten.appendChild(a);
+                    });
+
+                    var oder = document.createElement('p');
+                    oder.className = 'rfat-pub-share-hint';
+                    oder.textContent = 'Oder gib unten einen anderen Code ein. ';
+                    var weg2 = document.createElement('button');
+                    weg2.type = 'button';
+                    weg2.className = 'rfat-pub-linkknopf';
+                    weg2.textContent = 'gemerkte Termine löschen';
+                    weg2.addEventListener('click', function () {
+                        vergessen();
+                        kasten.hidden = true;
+                    });
+                    oder.appendChild(weg2);
+                    kasten.appendChild(oder);
+                    kasten.hidden = false;
+                }
+            }
+        })();
+
         (function () {
             var btns = document.querySelectorAll('.rfat-pub-copy');
             if (!btns.length) { return; }
@@ -2385,6 +2759,101 @@ add_action('template_redirect', function () {
 });
 
 /**
+ * Die fertige Nachricht an den Gast — zum Kopieren und in Signal einfügen.
+ *
+ * Signal-Links können **keinen** Text vorbelegen; ein Gegenstück zu
+ * WhatsApps `?text=` gibt es nicht. Näher als „Text kopieren und Chat
+ * öffnen" kommt man deshalb nicht heran: einmal drücken, in Signal
+ * einfügen, senden.
+ *
+ * Der Link auf die Terminseite steht bewusst drin. Damit hat der Gast
+ * seinen Zugang in der Hand, auch wenn er den Code längst verlegt hat —
+ * genau der Fall, der das hier ausgelöst hat.
+ */
+function rfat_signal_nachricht($post_id) {
+    $analysis = rfat_analyse_booking($post_id);
+    $ts       = $analysis['datetime'] ? $analysis['datetime']->getTimestamp() : null;
+    $code     = rfat_normalize_code($analysis['code']['value'] ?? '');
+    $link     = home_url('/termin-abrufen/?code=' . rawurlencode($code));
+    $status   = rfat_get_status($post_id);
+
+    $zeilen = ['Hallo! Hier ist ' . get_bloginfo('name') . '.'];
+
+    if ($ts) {
+        $zeilen[] = ($status === 'bestaetigt' ? 'Dein Termin steht: ' : 'Es geht um deinen Termin am ')
+                  . wp_date('l, d.m.Y', $ts) . ' um ' . wp_date('H:i', $ts) . ' Uhr.';
+    }
+
+    $frage = rfat_dialog_offene_frage($post_id);
+    if ($frage) {
+        $zeilen[] = '';
+        $zeilen[] = $frage['text'];
+    }
+
+    $zeilen[] = '';
+    $zeilen[] = 'Deinen Termin ansehen, verschieben oder absagen (Code ' . $code . '):';
+    $zeilen[] = $link;
+
+    return implode("\n", $zeilen);
+}
+
+/**
+ * Das Team über eine eingegangene Antwort informieren.
+ *
+ * Ohne diese Mail bliebe die Antwort in der Übersicht liegen, bis jemand
+ * von sich aus nachsieht — und wer eine Frage stellt, sieht nicht dauernd
+ * nach.
+ */
+function rfat_notify_antwort($post_id) {
+    $to = rfat_notify_recipients();
+    if (!$to) {
+        return;
+    }
+    $verlauf = rfat_dialog_lesen($post_id);
+    $letzter = $verlauf ? end($verlauf) : null;
+    if (!$letzter || $letzter['von'] !== 'gast') {
+        return;
+    }
+
+    $body = "Zu einer Buchung ist eine Antwort eingegangen.\n\n"
+          . rfat_booking_summary($post_id) . "\n\n"
+          . "Antwort:\n  " . str_replace("\n", "\n  ", $letzter['text']) . "\n\n"
+          . "In der Übersicht ansehen:\n"
+          . admin_url('edit.php?post_type=rc_booking&page=rfat-overview') . "\n\n"
+          . "-- \nAutomatische Nachricht von " . get_bloginfo('name');
+
+    rfat_send_logged($to, sprintf('[%s] Antwort zu einer Buchung', get_bloginfo('name')), $body);
+}
+
+/**
+ * Den Gast über eine neue Rückfrage informieren — wieder nur, wenn er
+ * freiwillig eine Adresse hinterlassen hat.
+ *
+ * Hat er stattdessen Signal hinterlegt, schreibt ihn das Team dort an;
+ * dafür gibt es in der Übersicht den fertigen Nachrichtentext.
+ */
+function rfat_notify_frage($post_id, $frage) {
+    $to = (string) get_post_meta($post_id, RFAT_EMAIL_META, true);
+    if ($to === '' || !is_email($to)) {
+        return;
+    }
+    $analysis = rfat_analyse_booking($post_id);
+    $code     = rfat_normalize_code($analysis['code']['value'] ?? '');
+    $ts       = $analysis['datetime'] ? $analysis['datetime']->getTimestamp() : null;
+    $manage   = home_url('/termin-abrufen/?code=' . rawurlencode($code));
+
+    $body = "Guten Tag,\n\nwir haben eine Frage zu deinem Termin"
+          . ($ts ? ' am ' . wp_date('d.m.Y', $ts) . ' um ' . wp_date('H:i', $ts) . ' Uhr' : '')
+          . ":\n\n  " . str_replace("\n", "\n  ", $frage)
+          . "\n\nAntworten kannst du hier — dort steht auch dein Termin:\n" . $manage;
+
+    $body .= "\n\nKeine Nachrichten mehr? Hier abmelden:\n"
+          . home_url('/termin-abrufen/?abmelden=' . rawurlencode($code));
+
+    rfat_send_logged($to, 'Kurze Frage zu deinem Reparaturtermin', $body);
+}
+
+/**
  * Den Gast informieren — nur wenn er freiwillig eine Adresse hinterlegt hat.
  */
 function rfat_notify_customer($post_id, $was) {
@@ -2916,6 +3385,10 @@ function rfat_cleanup_emails() {
                 'key'     => RFAT_SIGNAL_META,
                 'compare' => 'EXISTS',
             ],
+            [
+                'key'     => RFAT_DIALOG_META,
+                'compare' => 'EXISTS',
+            ],
         ],
         'suppress_filters' => false,
     ]);
@@ -2933,10 +3406,7 @@ function rfat_cleanup_emails() {
     $removed = 0;
 
     foreach ($posts as $post_id) {
-        // Ausdrücklich erlaubt: bleibt liegen.
-        if (get_post_meta($post_id, RFAT_EMAIL_KEEP_META, true) === '1') {
-            continue;
-        }
+        $bleiben = get_post_meta($post_id, RFAT_EMAIL_KEEP_META, true) === '1';
 
         $analysis = rfat_analyse_booking($post_id);
         $dt       = $analysis['datetime'];
@@ -2960,10 +3430,29 @@ function rfat_cleanup_emails() {
             continue;
         }
 
-        delete_post_meta($post_id, RFAT_EMAIL_META);
-        delete_post_meta($post_id, RFAT_SIGNAL_META);
-        delete_post_meta($post_id, RFAT_EMAIL_KEEP_META);
-        $removed++;
+        $etwas = false;
+
+        /*
+         * Der Frage-und-Antwort-Verlauf geht immer — auch wenn die
+         * Kontaktdaten bleiben dürfen. Das Häkchen ist eine Entscheidung
+         * über die Erreichbarkeit, nicht darüber, wie lange Notizen zu
+         * einem längst vergangenen Termin herumliegen.
+         */
+        if (delete_post_meta($post_id, RFAT_DIALOG_META)) {
+            $etwas = true;
+        }
+
+        // Kontaktdaten nur, wenn nicht ausdrücklich erlaubt.
+        if (!$bleiben) {
+            delete_post_meta($post_id, RFAT_EMAIL_META);
+            delete_post_meta($post_id, RFAT_SIGNAL_META);
+            delete_post_meta($post_id, RFAT_EMAIL_KEEP_META);
+            $etwas = true;
+        }
+
+        if ($etwas) {
+            $removed++;
+        }
     }
 
     return $removed;
@@ -3868,7 +4357,7 @@ define('RFAT_GATE_TEXT',   'rfat_gate_datenschutz');
  * Punkt 6) als auch in der Richtigstellung weiter unten; zwei Fassungen
  * davon waeren zwei Fassungen zu viel.
  */
-define('RFAT_COOKIE_ABSATZ', '<p>Diese Website setzt für Besucher:innen keine eigenen Cookies. Für Team-Mitglieder setzt WordPress beim Login in den Verwaltungsbereich technisch notwendige Cookies. Zum technisch notwendigen Cookie des vorgelagerten Dienstes siehe den Abschnitt „Auslieferung über Cloudflare (CDN)". Rechtsgrundlage: § 25 Abs. 2 TDDDG i. V. m. Art. 6 Abs. 1 lit. f DSGVO.</p>');
+define('RFAT_COOKIE_ABSATZ', '<p>Diese Website setzt für Besucher:innen keine eigenen Cookies. Für Team-Mitglieder setzt WordPress beim Login in den Verwaltungsbereich technisch notwendige Cookies. Zum technisch notwendigen Cookie des vorgelagerten Dienstes siehe den Abschnitt „Auslieferung über Cloudflare (CDN)". Rechtsgrundlage: § 25 Abs. 2 TDDDG i. V. m. Art. 6 Abs. 1 lit. f DSGVO.</p><p>Ein Cookie ist es nicht, gehört aber hierher: Damit du wieder an deinen Termin kommst, legt dein Browser deinen <strong>Buchungscode auf deinem Gerät</strong> ab (localStorage). Er wird <strong>nicht an uns übertragen</strong>, ist für andere Websites nicht lesbar und dient allein dazu, dir den Termin beim nächsten Besuch wieder anzubieten. Das ist für die von dir gewünschte Funktion erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG). Du kannst ihn auf der Seite <a href="/termin-abrufen/">Termin abrufen</a> jederzeit mit einem Klick entfernen („nicht merken" bzw. „gemerkte Termine löschen") oder die Websitedaten in deinem Browser löschen.</p>');
 
 
 /*
@@ -3879,6 +4368,14 @@ define('RFAT_COOKIE_ABSATZ', '<p>Diese Website setzt für Besucher:innen keine e
  */
 define('RFAT_MISSBRAUCH_ABSATZ', '<h2>Schutz vor Mehrfachbuchungen</h2><p>Damit von einem einzelnen Gerät nicht beliebig viele Termine belegt werden können, prüfen wir beim Abschicken einer Buchung, wie viele <em>offene</em> Termine bereits von derselben Internet-Verbindung gebucht sind. Deine IP-Adresse wird dafür <strong>nicht gespeichert</strong>: Sie wird sofort in einen nicht umkehrbaren Prüfwert umgerechnet (HMAC-SHA-256 mit einem geheimen, nur auf dem Server vorhandenen Schlüssel); allein dieser Wert wird an der Buchung hinterlegt. Auf deine Adresse lässt er sich nicht zurückrechnen, und mit ihm ist auch kein Wiedererkennen über andere Seiten hinweg möglich. Der Prüfwert wird nach deinem Termin automatisch gelöscht, bei einer Stornierung sofort. Rechtsgrundlage ist unser berechtigtes Interesse daran, die knappen ehrenamtlichen Termine für alle nutzbar zu halten (Art. 6 Abs. 1 lit. f DSGVO).</p>');
 
+
+
+/*
+ * Absatz zu Rückfragen (seit 1.22.0) — dieselbe Machart wie die
+ * Absätze darunter: einmal hier, eingesetzt in die frische wie in die
+ * bestehende Datenschutzseite.
+ */
+define('RFAT_FRAGEN_ABSATZ', '<h2>Rückfragen zu deinem Termin</h2><p>Manchmal müssen wir vor dem Termin etwas wissen – ob du das Ladegerät mitbringst zum Beispiel. Solche Fragen und deine Antworten stehen bei deiner Buchung und sind über deinen Buchungscode sichtbar. Schreib dort bitte <strong>nur, was zur Reparatur gehört</strong>; personenbezogene Angaben sind nicht nötig. Rechtsgrundlage ist unser berechtigtes Interesse an der Vorbereitung des Termins (Art. 6 Abs. 1 lit. f DSGVO), bei freiwilligen Angaben deine Einwilligung (Art. 6 Abs. 1 lit. a DSGVO). Der Verlauf wird nach deinem Termin automatisch gelöscht, bei einer Stornierung mit der Buchung.</p>');
 
 /*
  * Absatz zum freiwilligen Signal-Kontakt (seit 1.19.0). Aus einer Hand
@@ -4168,12 +4665,16 @@ add_action('init', function () {
 }, 31);
 
 /**
- * Den Absatz zum Signal-Kontakt in die bestehende Datenschutzseite
- * einsetzen — oder eine ältere Fassung davon ersetzen — und die dort
- * zitierte Beschriftung des Häkchens nachziehen, die mit dem zweiten Feld
- * ihren Wortlaut geändert hat.
+ * Die Datenschutzseite auf den Stand des Plugins bringen: Abschnitte zu
+ * Signal, zu Rückfragen und zum lokal gemerkten Buchungscode einsetzen
+ * oder ältere Fassungen davon ersetzen, und die zitierte Beschriftung des
+ * Häkchens nachziehen.
  *
- * Die Textarbeit steckt in rfat_datenschutz_signal_text(): ohne
+ * Angefasst werden nur diese Abschnitte — alles andere auf der Seite
+ * gehört dem Betreiber. Das Hochzählen von `rc_setup_version` schriebe
+ * dagegen alle fünf Seiten neu.
+ *
+ * Die Textarbeit steckt in rfat_datenschutz_text_pflegen(): ohne
  * Datenbank, damit sie sich prüfen lässt.
  *
  * Gleiche Zurückhaltung wie bei den beiden Absätzen davor: Es wird ein
@@ -4181,44 +4682,58 @@ add_action('init', function () {
  *
  * @return bool Ob der Absatz jetzt (oder schon vorher) drinsteht.
  */
-function rfat_datenschutz_signal_text($alt) {
+function rfat_datenschutz_text_pflegen($alt) {
     $neu = str_replace(
         '„Meine Adresse darf auch nach dem Termin gespeichert bleiben"',
         '„Meine Angaben dürfen auch nach dem Termin gespeichert bleiben"',
         (string) $alt
     );
 
-    $kopf   = '<h2>Freiwilliger Kontakt über Signal</h2>';
-    $stelle = strpos($neu, $kopf);
+    $neu = rfat_absatz_setzen($neu, '<h2>Freiwilliger Kontakt über Signal</h2>', RFAT_SIGNAL_ABSATZ,
+        ['<h2>Rückfragen zu deinem Termin</h2>', '<h2>Schutz vor Mehrfachbuchungen</h2>', '<h2>Cookies</h2>', '<h2>Server-Protokolle</h2>']);
 
-    if ($stelle === false) {
-        // Möglichst dicht an den E-Mail-Abschnitt: Was zusammengehört, soll
-        // beieinanderstehen und nicht am Seitenende auftauchen.
-        $pos = false;
-        foreach (['<h2>Schutz vor Mehrfachbuchungen</h2>', '<h2>Cookies</h2>', '<h2>Server-Protokolle</h2>'] as $marke) {
-            $pos = strpos($neu, $marke);
-            if ($pos !== false) {
-                break;
-            }
-        }
-        return $pos === false
-            ? $neu . "\n" . RFAT_SIGNAL_ABSATZ
-            : substr($neu, 0, $pos) . RFAT_SIGNAL_ABSATZ . "\n" . substr($neu, $pos);
-    }
+    $neu = rfat_absatz_setzen($neu, '<h2>Rückfragen zu deinem Termin</h2>', RFAT_FRAGEN_ABSATZ,
+        ['<h2>Schutz vor Mehrfachbuchungen</h2>', '<h2>Cookies</h2>', '<h2>Server-Protokolle</h2>']);
 
     /*
-     * Der Abschnitt steht schon da, stammt aber aus 1.19.0 und kennt den
-     * Signal-Link noch nicht. Ersetzt wird deshalb genau dieser eine
-     * Abschnitt — von seiner Überschrift bis zur nächsten.
-     *
-     * Deshalb auch die Fassungsnummer in der Option statt einer blossen
-     * '1': Die Routine muss nach dem Update ein zweites Mal laufen dürfen,
-     * sonst bliebe der veraltete Text stehen.
+     * Der Cookie-Abschnitt sagte „keine eigenen Cookies" und schwieg zum
+     * lokal gemerkten Buchungscode. Das stimmt so nicht mehr, also wird er
+     * mitgezogen — als ganzer Abschnitt, wie die anderen auch.
      */
-    $ende = strpos($neu, '<h2>', $stelle + strlen($kopf));
+    $neu = rfat_absatz_setzen($neu, '<h2>Cookies</h2>', '<h2>Cookies</h2>' . RFAT_COOKIE_ABSATZ,
+        ['<h2>Server-Protokolle</h2>']);
+
+    return $neu;
+}
+
+/**
+ * Einen Abschnitt einsetzen oder eine ältere Fassung davon ersetzen.
+ *
+ * Ein Abschnitt reicht von seiner Überschrift bis zur nächsten `<h2>`.
+ * Steht er noch nicht da, kommt er vor die erste Marke, die sich finden
+ * lässt; findet sich keine, ans Ende.
+ *
+ * Warum ersetzen statt nur prüfen, ob schon etwas da ist: Sonst bliebe auf
+ * bestehenden Seiten für immer der Text stehen, mit dem der Abschnitt
+ * einmal eingesetzt wurde — samt allem, was inzwischen nicht mehr stimmt.
+ */
+function rfat_absatz_setzen($inhalt, $kopf, $absatz, array $marken) {
+    $stelle = strpos($inhalt, $kopf);
+
+    if ($stelle === false) {
+        foreach ($marken as $marke) {
+            $pos = strpos($inhalt, $marke);
+            if ($pos !== false) {
+                return substr($inhalt, 0, $pos) . $absatz . "\n" . substr($inhalt, $pos);
+            }
+        }
+        return $inhalt . "\n" . $absatz;
+    }
+
+    $ende = strpos($inhalt, '<h2>', $stelle + strlen($kopf));
     return $ende === false
-        ? substr($neu, 0, $stelle) . RFAT_SIGNAL_ABSATZ
-        : substr($neu, 0, $stelle) . RFAT_SIGNAL_ABSATZ . "\n" . substr($neu, $ende);
+        ? substr($inhalt, 0, $stelle) . $absatz
+        : substr($inhalt, 0, $stelle) . $absatz . "\n" . substr($inhalt, $ende);
 }
 
 function rfat_datenschutz_signal_absatz() {
@@ -4228,7 +4743,7 @@ function rfat_datenschutz_signal_absatz() {
     }
 
     $alt = (string) $seite->post_content;
-    $neu = rfat_datenschutz_signal_text($alt);
+    $neu = rfat_datenschutz_text_pflegen($alt);
 
     if ($neu !== $alt) {
         wp_update_post(['ID' => $seite->ID, 'post_content' => $neu]);
@@ -4241,7 +4756,7 @@ function rfat_datenschutz_signal_absatz() {
  * Fassung des Signal-Absatzes. Hochzählen, wenn sich der Text ändert —
  * dann zieht die Routine ihn auf bestehenden Seiten nach.
  */
-define('RFAT_DS_SIGNAL_FASSUNG', '2');
+define('RFAT_DS_SIGNAL_FASSUNG', '3');
 
 add_action('init', function () {
     if (get_option('rfat_ds_signal') === RFAT_DS_SIGNAL_FASSUNG) {
@@ -5032,10 +5547,10 @@ if (!function_exists('rc_build_slots')) {
           <form method="post" action="<?php echo esc_url(rc_booking_page_url(array('was' => $slot['cat'], 'wann' => $slot['id']))); ?>">
             <?php wp_nonce_field('rc_book', 'rc_nonce'); ?>
             <input type="hidden" name="slot" value="<?php echo esc_attr($slot['id']); ?>">
-            <label class="rc-note-label" for="rc-note">Kurz: Was ist kaputt? <span>(freiwillig, keine persönlichen Angaben nötig)</span></label>
+            <label class="rc-note-label" for="rc-note">Was ist kaputt? <span>(freiwillig)</span></label>
             <textarea id="rc-note" name="note" rows="3" maxlength="300" placeholder="z. B. 'Handy-Akku hält nicht mehr' oder 'E-Bike bremst schleift'"></textarea>
             <button type="submit" name="rc_book_submit" value="1" class="rc-btn">Termin anfragen</button>
-            <p class="rc-hint">Der Termin ist damit vorgemerkt, aber noch nicht bestätigt. Wir sehen uns die Anfrage an und melden uns.</p>
+            <p class="rc-hint">Noch nicht bestätigt — wir sehen uns die Anfrage an und melden uns.</p>
           </form>
         </div>
         <?php return ob_get_clean();
@@ -5184,6 +5699,7 @@ if (!function_exists('rc_build_slots')) {
     <p><strong>Widerruf:</strong> Du kannst deine Einwilligung jederzeit und ohne Angabe von Gründen widerrufen. Rufe dazu deinen Termin unter <a href="/termin-abrufen/">Termin abrufen</a> mit deinem Buchungscode auf, leere das E-Mail-Feld und speichere; alternativ nutzt du den Abmeldelink in jeder Nachricht. Die Rechtmäßigkeit der bis zum Widerruf erfolgten Verarbeitung bleibt unberührt.</p>
     <p><strong>Empfänger:</strong> Die Adresse wird nicht an Dritte weitergegeben und nicht für Werbung verwendet. Für den Versand der Nachrichten setzen wir einen E-Mail-Dienstleister als Auftragsverarbeiter ein; dieser wird hier benannt, sobald er eingerichtet ist.</p>
     <!--RFAT_SIGNAL-->
+    <!--RFAT_FRAGEN-->
     <!--RFAT_MISSBRAUCH-->
     <h2>Cookies</h2>
     <!--RFAT_COOKIES-->
@@ -5202,6 +5718,7 @@ if (!function_exists('rc_build_slots')) {
         $dsg = str_replace('<!--RFAT_COOKIES-->', RFAT_COOKIE_ABSATZ, $dsg);
         $dsg = str_replace('<!--RFAT_MISSBRAUCH-->', RFAT_MISSBRAUCH_ABSATZ, $dsg);
         $dsg = str_replace('<!--RFAT_SIGNAL-->', RFAT_SIGNAL_ABSATZ, $dsg);
+        $dsg = str_replace('<!--RFAT_FRAGEN-->', RFAT_FRAGEN_ABSATZ, $dsg);
 
         $pages = array(
             'termin-buchen' => array('Termin buchen',
