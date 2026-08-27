@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.21.0
+Stand: 27.08.2026 · Plugin-Version 1.22.0
 
 ---
 
@@ -468,6 +468,80 @@ statt es den Betrachter aus dem fehlenden Knopf schliessen zu lassen.
 
 ---
 
+### 3.10 Der verlorene Code, Rückfragen, fertige Nachricht (1.22.0)
+
+Ausgelöst von einem Test im Wohnzimmer: Eine Testbucherin hat **nicht alles
+gelesen** (zu viel Text), den Code **nicht notiert** und kam nie wieder an
+ihren Termin. Erreichbar war sie nur, weil sie ihren Signal-Namen
+hinterlassen hatte. Drei Antworten darauf:
+
+#### Das Gerät merkt sich den Code
+
+Der Code ist das einzige Credential — wir speichern ja weder Namen noch
+Konto. Wer ihn nicht notiert, ist raus. Deshalb legt der Browser die
+angezeigten Codes jetzt **lokal** ab (`localStorage`, Schlüssel
+`rfat_codes`, höchstens fünf). Auf `/termin-abrufen/` ohne Code stehen sie
+als Knöpfe ganz oben: *RC-AB12C anzeigen*.
+
+| | |
+|---|---|
+| Wohin | nur in den Browser des Geräts — **nichts geht an den Server** |
+| Wieder weg | „nicht merken" auf der Terminseite, „gemerkte Termine löschen" auf der Übersicht, oder Websitedaten löschen |
+| Wenn's nicht geht | privates Fenster, gesperrter Speicher: alles in `try/catch`, dann steht der Hinweis gar nicht erst da |
+
+Der Hinweis „Dieses Gerät merkt sich den Termin" kommt **aus dem Skript**,
+nicht aus PHP: Er stimmt nur, wenn das Speichern wirklich geklappt hat.
+
+Die Datenschutzerklärung sagt das jetzt im Cookie-Abschnitt — „keine
+eigenen Cookies" allein wäre unvollständig, auch wenn `localStorage` kein
+Cookie ist. Rechtsgrundlage: § 25 Abs. 2 Nr. 2 TDDDG (für die gewünschte
+Funktion erforderlich).
+
+#### Rückfragen (`_rfat_dialog`)
+
+Eine Liste von Einträgen `['von' => 'team'|'gast', 'text', 'zeit']` statt
+zweier Felder „Frage" und „Antwort": Auf eine Antwort folgt oft die nächste
+Frage, zwei Felder müssten sich überschreiben, und gerade der Verlauf sorgt
+dafür, dass beide Seiten wissen, was besprochen ist. Gedeckelt auf 20
+Einträge à 1000 Zeichen — ein Formular im Netz ohne Obergrenze ist eine
+Einladung.
+
+- **Team:** Feld *Rückfrage an den Gast* im Bearbeiten-Bereich, darüber der
+  Verlauf. In der Liste steht „wartet auf Antwort" bzw. „Antwort da".
+- **Gast:** Die offene Frage steht **oben** auf seiner Terminseite, im
+  auffälligsten Kasten, mit Antwortfeld. Wer wegen einer Frage herkommt,
+  soll sie sehen und nicht suchen.
+- **Benachrichtigung:** Frage → Mail an den Gast (wenn Adresse da);
+  Antwort → Mail ans Team. Ohne die zweite bliebe die Antwort liegen, bis
+  jemand von sich aus nachsieht.
+- **Löschung:** Der Verlauf geht nach dem Termin **immer** — auch wenn die
+  Kontaktdaten bleiben dürfen. Das Häkchen entscheidet über Erreichbarkeit,
+  nicht darüber, wie lange Notizen zu einem vergangenen Termin herumliegen.
+
+#### Fertige Signal-Nachricht
+
+> **Signal-Links können keinen Text vorbelegen.** Ein Gegenstück zu
+> WhatsApps `?text=` gibt es nicht — die Schemata kennen nur `#p/`
+> (Telefonnummer) und `#eu/` (verschlüsselter Benutzername).
+
+Näher als **„Text kopieren & Signal öffnen"** kommt man nicht heran: ein
+Druck, in Signal einfügen, senden. Der Text steht in der Übersicht unter
+*Nachricht vorbereiten* (in `<details>`, damit die Tabelle nicht zuwächst)
+und ist vor dem Kopieren noch änderbar. Er enthält Termin, Code, eine
+offene Rückfrage — und **den Link auf die Terminseite**: Damit hat der Gast
+seinen Zugang zurück, auch wenn er den Code längst verlegt hat. Genau der
+Fall, der das hier ausgelöst hat.
+
+#### Weniger Text
+
+Gekürzt: Notizfeld und Hinweis in Schritt 3, der Hinweis nach dem Buchen,
+die Einleitung des Kontaktkastens, der Signal-Hinweis, die Beschriftung des
+Häkchens und der Merk-Kasten. Der Einleitungstext **auf** der Seite
+`/termin-buchen/` gehört dem Betreiber (Seiteneditor) und wurde nicht
+angefasst — dort steht noch der längste Absatz des Ablaufs.
+
+---
+
 ---
 
 ## 4. Versionshistorie
@@ -513,6 +587,7 @@ statt es den Betrachter aus dem fehlenden Knopf schliessen zu lassen.
 | 1.19.0 | **Freiwilliger Signal-Benutzername** neben der E-Mail — Benutzername statt Telefonnummer, gleiche Löschregeln (siehe 3.9) |
 | 1.20.0 | **Ablehnen-Knopf** in der Übersicht; **Signal-Link** als zweite Eingabeform, damit „In Signal öffnen" wirklich einen Chat öffnet |
 | 1.21.0 | Signal-Link **im Bearbeiten-Bereich nachtragbar**; Link-Prüfung nimmt beide Base64-Spielarten an; Formular fragt zuerst nach dem Link |
+| 1.22.0 | **Gerät merkt sich den Buchungscode**; **Rückfragen** an den Gast mit Antwort auf der Terminseite; fertiger Signal-Nachrichtentext; weniger Text im Ablauf (siehe 3.10) |
 
 ---
 
