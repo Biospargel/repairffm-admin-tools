@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
- * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.23.0
+ * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
+ * Version: 1.24.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -608,6 +608,64 @@ add_action('admin_init', function () {
         exit;
     }
 
+    if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'save_kategorien') {
+        if (!current_user_can('manage_options')
+            || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_save_kategorien')) {
+            wp_die('Sicherheitsprüfung fehlgeschlagen.');
+        }
+
+        $roh   = isset($_POST['rfat_kat']) && is_array($_POST['rfat_kat']) ? wp_unslash($_POST['rfat_kat']) : [];
+        $neu   = [];
+        foreach ($roh as $zeile) {
+            if (!is_array($zeile)) {
+                continue;
+            }
+            $name = trim(sanitize_text_field($zeile['name'] ?? ''));
+            if ($name === '') {
+                // Name geleert heißt: Zeile weg. So wird eine Kategorie gelöscht.
+                continue;
+            }
+
+            /*
+             * Der Schlüssel entsteht einmal aus dem Namen und bleibt dann.
+             * Er steckt in jeder Slot-Kennung und an jeder Buchung; wer ihn
+             * später mitzöge, würde bestehende Buchungen von ihrer
+             * Kategorie abschneiden.
+             */
+            $slug = sanitize_key($zeile['slug'] ?? '');
+            if ($slug === '') {
+                $slug = sanitize_key(sanitize_title($name));
+            }
+            if ($slug === '') {
+                $slug = 'kat';
+            }
+            $basis = $slug;
+            $n = 2;
+            while (isset($neu[$slug])) {
+                $slug = $basis . '-' . $n++;
+            }
+
+            $neu[$slug] = [
+                'name'    => $name,
+                'zeiten'  => rfat_zeiten_saeubern($zeile['zeiten'] ?? ''),
+                'buchbar' => !empty($zeile['buchbar']),
+            ];
+        }
+
+        $ziel = wp_get_referer() ?: admin_url('edit.php?post_type=rc_booking&page=rfat-overview');
+        if (!$neu) {
+            // Ohne Kategorie gäbe es keine Buchung mehr — das ist kein
+            // Zustand, in den man versehentlich rutschen soll.
+            wp_safe_redirect(add_query_arg('rfat_kat_leer', '1', $ziel));
+            exit;
+        }
+
+        update_option(RFAT_KATEGORIEN_OPTION, $neu);
+        delete_transient('rfat_booked_slots');
+        wp_safe_redirect(add_query_arg('rfat_kat_saved', '1', $ziel));
+        exit;
+    }
+
     if (isset($_POST['rfat_action']) && $_POST['rfat_action'] === 'check_update') {
         if (!current_user_can('manage_options')
             || !wp_verify_nonce($_POST['_wpnonce'] ?? '', 'rfat_check_update')) {
@@ -759,6 +817,15 @@ function rfat_render_overview_page() {
         <?php if (isset($_GET['rfat_limit_saved'])): ?>
             <div class="notice notice-success is-dismissible"><p>Buchungsgrenze gespeichert.</p></div>
         <?php endif; ?>
+        <?php if (isset($_GET['rfat_kat_saved'])): ?>
+            <div class="notice notice-success is-dismissible"><p>Kategorien gespeichert.</p></div>
+        <?php endif; ?>
+        <?php if (isset($_GET['rfat_kat_leer'])): ?>
+            <div class="notice notice-error is-dismissible"><p>
+                <strong>Nicht gespeichert:</strong> Es muss mindestens eine Kategorie mit Namen geben —
+                sonst liesse sich gar nichts mehr buchen.
+            </p></div>
+        <?php endif; ?>
 
         <?php
         $notify_now   = rfat_notify_recipients();
@@ -888,6 +955,88 @@ function rfat_render_overview_page() {
                     <?php endif; ?>
                 </p>
             </form>
+
+            <?php
+            /*
+             * Kategorien. Bis 1.23.0 standen „IT" und „E-Bike" fest im
+             * Code — jede weitere hätte ein Release gebraucht.
+             *
+             * In <details>, weil man Kategorien einmal einrichtet und
+             * danach selten anfasst; aufgeklappt bleibt es, solange etwas
+             * schiefging oder gerade gespeichert wurde.
+             */
+            $kategorien = rfat_kategorien();
+            $kat_offen  = isset($_GET['rfat_kat_saved']) || isset($_GET['rfat_kat_leer']);
+            ?>
+            <details style="margin:14px 0 0;" <?php echo $kat_offen ? 'open' : ''; ?>>
+                <summary style="cursor:pointer;font-weight:600;">Kategorien und Uhrzeiten (<?php echo count($kategorien); ?>)</summary>
+                <form method="post" style="margin-top:10px;">
+                    <?php wp_nonce_field('rfat_save_kategorien'); ?>
+                    <input type="hidden" name="rfat_action" value="save_kategorien" />
+                    <table class="widefat striped" style="max-width:820px;">
+                        <thead>
+                            <tr>
+                                <th style="width:34%;">Name</th>
+                                <th>Uhrzeiten</th>
+                                <th style="width:90px;">buchbar</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php
+                            $zeilen = $kategorien;
+                            // Eine leere Zeile zum Anlegen — immer genau eine.
+                            $zeilen['__neu'] = ['name' => '', 'zeiten' => [], 'buchbar' => true, 'neu' => true];
+                            $nr = 0;
+                            foreach ($zeilen as $slug => $eintrag):
+                                $ist_neu = !empty($eintrag['neu']);
+                                $nr++;
+                                ?>
+                                <tr>
+                                    <td>
+                                        <?php if (!$ist_neu): ?>
+                                            <input type="hidden" name="rfat_kat[<?php echo (int) $nr; ?>][slug]" value="<?php echo esc_attr($slug); ?>" />
+                                        <?php endif; ?>
+                                        <input type="text" style="width:100%;"
+                                               name="rfat_kat[<?php echo (int) $nr; ?>][name]"
+                                               value="<?php echo esc_attr($eintrag['name']); ?>"
+                                               placeholder="<?php echo $ist_neu ? 'Neue Kategorie, z. B. Nähmaschinen' : ''; ?>" />
+                                        <?php if (!$ist_neu): ?>
+                                            <span class="description"><code><?php echo esc_html($slug); ?></code></span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <input type="text" style="width:100%;"
+                                               name="rfat_kat[<?php echo (int) $nr; ?>][zeiten]"
+                                               value="<?php echo esc_attr(implode(', ', $eintrag['zeiten'])); ?>"
+                                               placeholder="14:00, 15:00, 16:00" />
+                                    </td>
+                                    <td style="text-align:center;">
+                                        <input type="checkbox" value="1"
+                                               name="rfat_kat[<?php echo (int) $nr; ?>][buchbar]"
+                                               <?php checked(!empty($eintrag['buchbar'])); ?> />
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <p style="margin:10px 0 0;">
+                        <button type="submit" class="button button-primary">Kategorien speichern</button>
+                        <span class="description" style="margin-left:8px;">
+                            Uhrzeiten durch Komma trennen. Der Haken <strong>buchbar</strong> entscheidet, ob die
+                            Kategorie im Ablauf erscheint — ohne ihn bleibt sie erhalten, bestehende Buchungen
+                            behalten also ihren Klartextnamen.
+                            <br />
+                            <strong>Name leeren und speichern löscht die Zeile.</strong> Bestehende Buchungen dazu
+                            bleiben bestehen, zeigen dann aber nur noch den Kurznamen
+                            (<code>naehmaschinen</code> statt <em>Nähmaschinen</em>) — zum Stilllegen ist der Haken
+                            der bessere Weg.
+                            <br />
+                            Der Kurzname entsteht einmal aus dem Namen und bleibt dann: Er steckt in jeder Buchung.
+                            Umbenennen ändert nur, was Besucher lesen.
+                        </span>
+                    </p>
+                </form>
+            </details>
         </div>
 
         <h2 class="nav-tab-wrapper">
@@ -1293,15 +1442,116 @@ function rfat_find_booking_by_code($code) {
  * page itself. Anything not in this list just falls back to a humanized
  * version of the raw value, so nothing is ever hidden.
  */
-function rfat_friendly_category($raw) {
-    $map = [
-        'it'    => 'IT & Elektronik (Handy · Laptop · IT)',
-        'ebike' => 'E-Bike-Service',
+/*
+ * Kategorien und ihre Uhrzeiten (seit 1.24.0 einstellbar).
+ *
+ * Bis dahin standen „IT" und „E-Bike" fest im Code — jede weitere
+ * Kategorie hätte ein Release gebraucht. Jetzt stehen sie in einer Option
+ * und lassen sich in der Übersicht pflegen.
+ *
+ * Der Schlüssel (Slug) bleibt dabei, was er ist: Er steckt in jeder
+ * Slot-Kennung (`it_2026-08-29_1430`) und an jeder Buchung (`_rc_cat`).
+ * Umbenennen darf man deshalb nur den Namen, nie den Schlüssel — sonst
+ * fänden bestehende Buchungen ihre Kategorie nicht mehr.
+ */
+define('RFAT_KATEGORIEN_OPTION', 'rfat_kategorien');
+
+/**
+ * Die Voreinstellung — genau die beiden Kategorien, die bis 1.23.0 fest
+ * im Code standen.
+ */
+function rfat_kategorien_standard() {
+    return [
+        'it' => [
+            'name'    => 'IT & Elektronik (Handy · Laptop · IT)',
+            'zeiten'  => ['14:00', '14:30', '15:00', '15:30', '16:00', '16:30'],
+            'buchbar' => true,
+        ],
+        'ebike' => [
+            'name'    => 'E-Bike-Service',
+            'zeiten'  => ['14:00', '15:00', '16:00'],
+            'buchbar' => true,
+        ],
     ];
-    $key = strtolower(trim((string) $raw));
-    if (isset($map[$key])) {
-        return $map[$key];
+}
+
+/**
+ * Alle Kategorien, wie sie eingestellt sind.
+ *
+ * @param bool $nur_buchbare Nur die, die im Buchungsablauf erscheinen
+ *                           sollen. Für die Anzeige alter Buchungen
+ *                           braucht es auch die stillgelegten.
+ */
+function rfat_kategorien($nur_buchbare = false) {
+    $roh = get_option(RFAT_KATEGORIEN_OPTION, null);
+    $liste = is_array($roh) && $roh ? $roh : rfat_kategorien_standard();
+
+    $sauber = [];
+    foreach ($liste as $slug => $eintrag) {
+        $slug = sanitize_key((string) $slug);
+        if ($slug === '' || !is_array($eintrag)) {
+            continue;
+        }
+        $name = trim((string) ($eintrag['name'] ?? ''));
+        if ($name === '') {
+            continue;
+        }
+        $buchbar = !isset($eintrag['buchbar']) || (bool) $eintrag['buchbar'];
+        if ($nur_buchbare && !$buchbar) {
+            continue;
+        }
+        $sauber[$slug] = [
+            'name'    => $name,
+            'zeiten'  => rfat_zeiten_saeubern($eintrag['zeiten'] ?? []),
+            'buchbar' => $buchbar,
+        ];
     }
+
+    return $sauber;
+}
+
+/**
+ * Uhrzeiten in Ordnung bringen: nur HH:MM, ohne Dopplungen, aufsteigend.
+ *
+ * Eine leere Liste ist erlaubt und heißt „für diese Kategorie gibt es
+ * derzeit keine Termine" — nicht dasselbe wie „nicht buchbar", aber in
+ * der Wirkung nah dran.
+ */
+function rfat_zeiten_saeubern($roh) {
+    if (is_string($roh)) {
+        $roh = preg_split('/[\s,;]+/', $roh);
+    }
+    if (!is_array($roh)) {
+        return [];
+    }
+    $zeiten = [];
+    foreach ($roh as $wert) {
+        $wert = trim((string) $wert);
+        if (preg_match('/^([0-9]{1,2}):([0-9]{2})$/', $wert, $t)
+            && (int) $t[1] < 24 && (int) $t[2] < 60) {
+            $zeiten[] = sprintf('%02d:%02d', (int) $t[1], (int) $t[2]);
+        }
+    }
+    $zeiten = array_values(array_unique($zeiten));
+    sort($zeiten);
+    return array_slice($zeiten, 0, 40);
+}
+
+function rfat_friendly_category($raw) {
+    $key = strtolower(trim((string) $raw));
+
+    /*
+     * Auch die stillgelegten Kategorien: Eine Buchung von vor der
+     * Umstellung soll ihren Klartextnamen behalten, selbst wenn die
+     * Kategorie längst nicht mehr buchbar ist.
+     */
+    $kategorien = rfat_kategorien();
+    if (isset($kategorien[$key])) {
+        return $kategorien[$key]['name'];
+    }
+
+    // Ganz gelöscht und trotzdem noch an einer Buchung: dann der Slug,
+    // lesbar gemacht.
     return rfat_humanize_key((string) $raw);
 }
 
@@ -5234,15 +5484,23 @@ if (!function_exists('rc_build_slots')) {
      * 2) Slot-Generierung: die naechsten 4 Samstage, 14–17 Uhr
      *    (Termine hier zentral aenderbar)
      * ------------------------------------------------------------- */
+    /*
+     * Buchbare Kategorien und ihre Uhrzeiten kommen seit 1.24.0 aus der
+     * Einstellung (siehe rfat_kategorien()). Die beiden Funktionen bleiben
+     * als Namen bestehen: Sie stehen an einem Dutzend Stellen im
+     * Buchungsablauf, und der Ablauf soll nicht wissen müssen, woher die
+     * Liste kommt.
+     */
     function rc_categories() {
-        return array(
-            'it'    => 'IT & Elektronik (Handy · Laptop · IT)',
-            'ebike' => 'E-Bike-Service',
-        );
+        $namen = array();
+        foreach (rfat_kategorien(true) as $slug => $eintrag) {
+            $namen[$slug] = $eintrag['name'];
+        }
+        return $namen;
     }
     function rc_slot_times($cat) {
-        if ($cat === 'ebike') return array('14:00','15:00','16:00');
-        return array('14:00','14:30','15:00','15:30','16:00','16:30');
+        $kategorien = rfat_kategorien(true);
+        return isset($kategorien[$cat]) ? $kategorien[$cat]['zeiten'] : array();
     }
     function rc_weekday_de($w) {
         $d = array('Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag');
@@ -5558,11 +5816,17 @@ if (!function_exists('rc_build_slots')) {
           <?php echo rc_booking_error_html(); ?>
           <?php echo rc_step_marker(1); ?>
           <h2 class="rc-h">Was möchtest du reparieren?</h2>
-          <div class="rc-cats">
-            <?php foreach (rc_categories() as $ck => $cl): ?>
-              <a class="rc-cat" href="<?php echo esc_url(rc_booking_page_url(array('was' => $ck))); ?>"><?php echo esc_html($cl); ?></a>
-            <?php endforeach; ?>
-          </div>
+          <?php $rc_cats = rc_categories(); ?>
+          <?php if (!$rc_cats): ?>
+            <?php // Alle Kategorien stillgelegt — dann lieber ein Satz als eine leere Fläche. ?>
+            <p>Zurzeit nehmen wir keine Termine an. Schau in ein paar Tagen noch einmal vorbei.</p>
+          <?php else: ?>
+            <div class="rc-cats">
+              <?php foreach ($rc_cats as $ck => $cl): ?>
+                <a class="rc-cat" href="<?php echo esc_url(rc_booking_page_url(array('was' => $ck))); ?>"><?php echo esc_html($cl); ?></a>
+              <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
         </div>
         <?php return ob_get_clean();
     }
