@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.23.0
+Stand: 27.08.2026 · Plugin-Version 1.24.0
 
 ---
 
@@ -565,6 +565,36 @@ angefasst — dort steht noch der längste Absatz des Ablaufs.
 
 ---
 
+### 3.11 Kategorien einstellbar (seit 1.24.0)
+
+„IT" und „E-Bike" standen fest im Code — jede weitere Kategorie hätte ein
+Release gebraucht. Jetzt stehen sie in der Option `rfat_kategorien` und
+lassen sich unter *Buchungen → Übersicht → Kategorien und Uhrzeiten*
+pflegen: Name, Uhrzeiten (Komma-Liste), Haken **buchbar**.
+
+`rc_categories()` und `rc_slot_times()` heissen weiterhin so und liefern
+jetzt aus der Einstellung. Sie stehen an einem Dutzend Stellen im
+Buchungsablauf, und der Ablauf soll nicht wissen müssen, woher die Liste
+kommt.
+
+> **Der Kurzname (Slug) ist unveränderlich.** Er steckt in jeder
+> Slot-Kennung (`it_2026-08-29_1430`) und an jeder Buchung (`_rc_cat`). Er
+> entsteht einmal aus dem Namen und wird beim Umbenennen **nicht**
+> mitgezogen — sonst fänden bestehende Buchungen ihre Kategorie nicht mehr.
+
+| Handlung | Folge |
+|---|---|
+| Haken *buchbar* weg | verschwindet aus dem Ablauf, **bleibt** aber für die Anzeige alter Buchungen |
+| Name leeren, speichern | Zeile weg; alte Buchungen zeigen nur noch den Kurznamen |
+| alle Zeilen leeren | wird abgelehnt — ohne Kategorie liesse sich nichts mehr buchen |
+
+`rfat_friendly_category()` liest deshalb **alle** Kategorien, auch die
+stillgelegten. Eine Kategorie ohne Uhrzeiten ist erlaubt und heisst „derzeit
+keine Termine"; sind alle stillgelegt, steht auf der Buchungsseite ein Satz
+statt einer leeren Fläche.
+
+---
+
 ---
 
 ## 4. Versionshistorie
@@ -612,6 +642,7 @@ angefasst — dort steht noch der längste Absatz des Ablaufs.
 | 1.21.0 | Signal-Link **im Bearbeiten-Bereich nachtragbar**; Link-Prüfung nimmt beide Base64-Spielarten an; Formular fragt zuerst nach dem Link |
 | 1.22.0 | **Gerät merkt sich den Buchungscode**; **Rückfragen** an den Gast mit Antwort auf der Terminseite; fertiger Signal-Nachrichtentext; weniger Text im Ablauf (siehe 3.10) |
 | 1.23.0 | Der Gast kann **von sich aus etwas nachtragen**, nicht nur auf Fragen antworten |
+| 1.24.0 | **Kategorien und Uhrzeiten einstellbar** statt fest im Code (siehe 3.11) |
 
 ---
 
@@ -758,6 +789,38 @@ und DMARC. Empfänger ist `repair.ffm@outlook.com`.
 
 Kommt ein externer Dienst hinzu, gehört er als Auftragsverarbeiter in die
 Datenschutzerklärung.
+
+#### Outlook.com ist eine Sackgasse — auch mit Abo (geprüft 27.08.2026)
+
+Microsoft hat **SMTP AUTH für persönliche Outlook.com-Postfächer
+abgeschaltet**, und zwar unabhängig vom Abo: Für neu angelegte Postfächer
+ist es aus, und ein **Microsoft 365 Personal** ändert daran nichts —
+Microsofts eigene Antwort im Q&A dazu lautet, nur *Business*- und
+*Enterprise*-Konten unterstützten SMTP AUTH. Auch OAuth hilft nicht, wenn
+der Dienst selbst `SmtpClientAuthentication` für das Postfach sperrt.
+
+**Daraus folgt: Geld an Microsoft löst das Problem nicht** — jedenfalls
+nicht unterhalb eines Business-Plans (~6 €/Nutzer/Monat), und der bringt
+einen weiteren Auftragsverarbeiter mit.
+
+Der Weg bleibt derselbe, den 1.9.5 schon nannte, nur mit klarerem Grund:
+ein **eigenes Postfach für `biospargel.org`**.
+
+1. **Zuerst beim Domain-Anbieter nachsehen** — bei vielen ist ein Postfach
+   im Domainpreis enthalten. Dann kostet es nichts extra, und es kommt keine
+   Partei hinzu.
+2. Sonst **mailbox.org Standard, 3 €/Monat** (Stand August 2026; eigene
+   Domain inbegriffen, `smtp.mailbox.org`, Port 465/587). Der Light-Tarif
+   für 1 € hat nur eine Adresse ohne eigene Domain.
+
+Absender dann `termine@biospargel.org` o. ä. — nötig ohnehin für SPF und
+DMARC. **Empfänger** darf `repair.ffm@outlook.com` bleiben; Outlook kann
+empfangen, nur nicht per SMTP senden.
+
+Bei Brevo/Mailjet/SMTP2GO bleibt es beim Nein von oben. Seit 1.19.0 gibt es
+ausserdem Signal als zweiten Weg zum Gast — die Mail ist damit nicht mehr
+der einzige Draht, aber für die Benachrichtigung des Teams weiterhin der
+wichtigste.
 
 ### Kleinere Punkte
 
