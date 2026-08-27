@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.27.0
+ * Version: 1.27.1
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -3997,14 +3997,56 @@ function rfat_explain_mail_error($message) {
              . 'Plugin aus nichts ändern — nötig ist ein SMTP-Versand, also ein '
              . 'echtes Postfach, über das WordPress verschickt.';
     }
+    /*
+     * Microsoft sperrt den SMTP-Versand fuer das Postfach selbst.
+     *
+     * Muss VOR der allgemeinen Anmeldefehler-Meldung stehen: Die Meldung
+     * enthaelt „SmtpClientAuthentication" und damit sowohl „smtp" als auch
+     * „auth", liefe also in den Zweig darunter — und der schickt einen auf
+     * die Suche nach einem Tippfehler im Passwort, den es nicht gibt.
+     * Geprueft am 27.08.2026: Bei persoenlichen Outlook.com-Postfaechern ist
+     * SMTP AUTH abgeschaltet, auch mit Microsoft 365 Personal. Nur
+     * Business- und Enterprise-Konten koennen es.
+     */
+    if (strpos($m, 'smtpclientauthentication') !== false
+        || strpos($m, '5.7.139') !== false
+        || (strpos($m, 'basic authentication') !== false && strpos($m, 'disabled') !== false)) {
+        return 'Nicht dein Passwort — der Anbieter hat den SMTP-Versand für dieses '
+             . 'Postfach abgeschaltet. Bei persönlichen Outlook.com-Konten ist das '
+             . 'seit 2026 der Normalfall, auch mit bezahltem Microsoft 365 Personal; '
+             . 'nur Business- und Enterprise-Konten dürfen noch senden. Hier hilft '
+             . 'kein Einstellen, sondern nur ein anderes Postfach — am besten eines '
+             . 'für die eigene Domain, das ohnehin für SPF und DMARC nötig ist.';
+    }
+
+    /*
+     * Zugang steht, aber die Absenderadresse gehoert nicht zum Postfach.
+     * Der haeufigste Stolperstein nach dem Einrichten: WordPress verschickt
+     * unter einer anderen Adresse, als das Postfach fuehrt.
+     */
+    if (strpos($m, 'send as this sender') !== false
+        || strpos($m, 'not allowed to send as') !== false
+        || strpos($m, 'relay access denied') !== false
+        || strpos($m, '5.7.60') !== false) {
+        return 'Der Zugang stimmt, aber die Absenderadresse gehört nicht zu diesem '
+             . 'Postfach. In FluentSMTP muss „From Email" genau die Adresse sein, '
+             . 'mit der du dich anmeldest — und der Haken „Force From Email" sorgt '
+             . 'dafür, dass WordPress keine andere unterschiebt.';
+    }
+
     if (strpos($m, 'smtp') !== false && (strpos($m, 'auth') !== false || strpos($m, 'password') !== false)) {
         return 'Der SMTP-Zugang wurde abgelehnt. Benutzername oder Passwort stimmen '
              . 'nicht, oder der Anbieter verlangt ein eigenes App-Passwort statt des '
-             . 'normalen Kennworts.';
+             . 'normalen Kennworts. Bei Anbietern mit Zwei-Faktor-Anmeldung ist es '
+             . 'fast immer ein App-Passwort.';
     }
-    if (strpos($m, 'connect') !== false || strpos($m, 'verbindung') !== false) {
+    if (strpos($m, 'connect') !== false || strpos($m, 'verbindung') !== false
+        || strpos($m, 'timed out') !== false || strpos($m, 'timeout') !== false) {
         return 'Der Mailserver war nicht erreichbar. Oft blockiert der Hoster den '
-             . 'ausgehenden Port; Port 587 statt 465 hilft in vielen Fällen.';
+             . 'ausgehenden Port; Port 587 statt 465 hilft in vielen Fällen. Läuft '
+             . 'WordPress in einem Container (hier: Umbrel/Docker), kann auch dessen '
+             . 'Netz nach draussen dicht sein — dann scheitert schon ein Verbindungs'
+             . 'versuch, ganz ohne Anmeldung.';
     }
     return '';
 }

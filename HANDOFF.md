@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.27.0
+Stand: 27.08.2026 · Plugin-Version 1.27.1
 
 ---
 
@@ -790,6 +790,7 @@ die Karte darüber** —, Radius 16 px, Hover grün, Absage-Zeile rot.
 | 1.25.0 | Menü am Rechner als **schwebendes Feld rechts** statt Vollbild (siehe 3.12) |
 | 1.26.0 | **Produktionsreif:** Statuszeile nur noch für Angemeldete, feste Menü-Reihenfolge, Seiten aus dem Menü nehmbar, Platzhalter-Warnung (siehe 3.13) |
 | 1.27.0 | Die drei Termin-Aktionen als **runde Zeilen** in der Sprache der Karte darüber |
+| 1.27.1 | Mail-Fehler klarer gedeutet: Microsofts SMTP-Sperre, falsche Absenderadresse, dichtes Container-Netz |
 
 ---
 
@@ -936,6 +937,23 @@ und DMARC. Empfänger ist `repair.ffm@outlook.com`.
 
 Kommt ein externer Dienst hinzu, gehört er als Auftragsverarbeiter in die
 Datenschutzerklärung.
+
+#### Was FluentSMTP meldet, und was es heisst (1.27.1)
+
+`rfat_explain_mail_error()` deutet die Meldung, die in der Übersicht unter
+*Testmail senden* steht. Drei Fälle kamen dazu:
+
+| Meldung enthält | Deutung |
+|---|---|
+| `SmtpClientAuthentication`, `5.7.139`, `basic authentication … disabled` | **Nicht das Passwort** — der Anbieter hat SMTP für das Postfach gesperrt (Outlook.com, siehe unten) |
+| `send as this sender`, `relay access denied`, `5.7.60` | Zugang steht, aber die Absenderadresse gehört nicht zum Postfach |
+| `timed out`, `connect` | Server nicht erreichbar — Port gesperrt, oder das Container-Netz kommt nicht nach draussen |
+
+> **Die Reihenfolge im Code ist wesentlich.** „SmtpClientAuthentication"
+> enthält sowohl `smtp` als auch `auth` und wäre sonst in den allgemeinen
+> Anmeldefehler gelaufen — der einen auf die Suche nach einem Tippfehler im
+> Passwort schickt, den es nicht gibt. Der Microsoft-Zweig steht deshalb
+> davor.
 
 #### Outlook.com ist eine Sackgasse — auch mit Abo (geprüft 27.08.2026)
 
