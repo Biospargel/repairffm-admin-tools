@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.20.0
+Stand: 27.08.2026 · Plugin-Version 1.21.0
 
 ---
 
@@ -438,6 +438,28 @@ auf der Seite der Text von 1.19.0 stehen, der den Link nicht kennt. Gesteuert
 Textarbeit steckt in `rfat_datenschutz_signal_text()` — ohne Datenbank,
 damit sie sich prüfen lässt.
 
+#### Warum meist nur „Namen kopieren" dastand (1.21.0)
+
+Der Knopf **„In Signal öffnen"** setzt einen gespeicherten Signal-Link voraus —
+und den gab es praktisch nie, aus drei Gründen. Alle drei sind behoben:
+
+1. **Das Formular fragte zuerst nach dem Benutzernamen.** Beschriftung,
+   Platzhalter und Hinweis führen jetzt mit dem Link; der Name steht als
+   „geht auch" dahinter.
+2. **Nachtragen ging nicht.** Wer den Link am Tresen oder am Telefon
+   durchgab, hatte keine Stelle, an der er landen konnte — die E-Mail steht
+   bewusst nicht im Bearbeiten-Bereich, weil sie dem Gast gehört. Beim
+   Signal-Link überwiegt der Nutzen: Er ist dort jetzt eintrag- und
+   löschbar, mit derselben Prüfung wie im öffentlichen Formular.
+3. **Der Zeichenvorrat war zu eng.** Die Prüfung nahm nur Base64 mit `-`
+   und `_` an. Kommt der Link in der anderen Spielart (`+` und `/`, ggf.
+   mit `=` aufgefüllt), wurde er wortreich als „kein Signal-Link"
+   abgewiesen. Jetzt sind beide erlaubt — welche Spielart Signal verwendet,
+   darf nicht darüber entscheiden, ob ein gültiger Link durchkommt.
+
+Steht nur ein Benutzername da, sagt die Übersicht das jetzt auch dazu,
+statt es den Betrachter aus dem fehlenden Knopf schliessen zu lassen.
+
 > **Nicht angefasst, aber aufgefallen:** `rfat_notify_email_added()` ist seit
 > jeher definiert und wird nirgends aufgerufen — es würde das Team
 > benachrichtigen, wenn kurz nach der Buchung noch Kontaktdaten nachgetragen
@@ -490,6 +512,7 @@ damit sie sich prüfen lässt.
 | 1.18.0 | **Sperre gegen Mehrfachbuchungen** — je Anschluss nur eine begrenzte Zahl offener Termine, IP-Adresse wird dabei nicht gespeichert (siehe 3.8) |
 | 1.19.0 | **Freiwilliger Signal-Benutzername** neben der E-Mail — Benutzername statt Telefonnummer, gleiche Löschregeln (siehe 3.9) |
 | 1.20.0 | **Ablehnen-Knopf** in der Übersicht; **Signal-Link** als zweite Eingabeform, damit „In Signal öffnen" wirklich einen Chat öffnet |
+| 1.21.0 | Signal-Link **im Bearbeiten-Bereich nachtragbar**; Link-Prüfung nimmt beide Base64-Spielarten an; Formular fragt zuerst nach dem Link |
 
 ---
 

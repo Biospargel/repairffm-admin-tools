@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Übersicht mit Zusagen/Ablehnen und Signal-Knopf. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.20.0
+ * Version: 1.21.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -258,8 +258,14 @@ function rfat_signal_pruefen($roh) {
      * Zuerst der Link — und der bleibt, wie er ist. Sein hinterer Teil ist
      * Base64 und damit gross-/kleinschreibungsempfindlich; wer ihn hier
      * kleinschriebe, machte ihn unbrauchbar.
+     *
+     * Der Zeichenvorrat ist bewusst weit: Base64 gibt es in zwei Spielarten,
+     * die eine mit `-` und `_`, die andere mit `+` und `/`. Welche Signal
+     * verwendet, darf hier nicht darüber entscheiden, ob ein gültiger Link
+     * angenommen wird — ein zu enger Vorrat wiese ihn wortreich als
+     * „kein Signal-Link" ab.
      */
-    if (preg_match('#^(?:https?://)?(?:www\.)?signal\.me/\#eu/([A-Za-z0-9_=-]{20,200})$#', $wert, $treffer)) {
+    if (preg_match('#^(?:https?://)?(?:www\.)?signal\.me/\#eu/([A-Za-z0-9_=+/.-]{20,300})$#', $wert, $treffer)) {
         return ['wert' => 'https://signal.me/#eu/' . $treffer[1], 'art' => 'link', 'fehler' => ''];
     }
 
@@ -452,8 +458,30 @@ add_action('admin_init', function () {
             update_post_meta($post_id, RFAT_STATUS_META, $status);
         }
 
+        /*
+         * Signal. Dieselbe Prüfung wie im öffentlichen Formular — sonst
+         * stünde hier irgendwann eine Telefonnummer im Feld für den
+         * Benutzernamen. Hakt sie, bleibt das Gespeicherte unangetastet
+         * und die Übersicht sagt, warum.
+         */
+        $signal_fehler = '';
+        if (isset($_POST['rfat_signal'])) {
+            $signal = rfat_signal_pruefen(sanitize_text_field(wp_unslash($_POST['rfat_signal'])));
+            if ($signal['fehler'] !== '') {
+                $signal_fehler = '1';
+            } elseif ($signal['wert'] === '') {
+                delete_post_meta($post_id, RFAT_SIGNAL_META);
+            } else {
+                update_post_meta($post_id, RFAT_SIGNAL_META, $signal['wert']);
+            }
+        }
+
         $redirect = wp_get_referer() ?: admin_url('edit.php?post_type=rc_booking&page=rfat-overview');
-        wp_safe_redirect(add_query_arg('rfat_saved', $post_id, $redirect));
+        $redirect = add_query_arg('rfat_saved', $post_id, $redirect);
+        if ($signal_fehler !== '') {
+            $redirect = add_query_arg('rfat_signal_fehler', '1', $redirect);
+        }
+        wp_safe_redirect($redirect);
         exit;
     }
 
@@ -616,6 +644,14 @@ function rfat_render_overview_page() {
 
         <?php if (isset($_GET['rfat_saved'])): ?>
             <div class="notice notice-success is-dismissible"><p>Buchung gespeichert.</p></div>
+        <?php endif; ?>
+        <?php if (isset($_GET['rfat_signal_fehler'])): ?>
+            <div class="notice notice-warning is-dismissible"><p>
+                <strong>Die Signal-Angabe wurde nicht übernommen</strong> — alles andere schon.
+                Erwartet wird entweder der Link (<code>https://signal.me/#eu/…</code>, in Signal
+                unter <em>Einstellungen &rarr; Profil &rarr; Benutzername &rarr; Link kopieren</em>)
+                oder der Benutzername in der Form <code>maxmuster.42</code>.
+            </p></div>
         <?php endif; ?>
         <?php if (isset($_GET['rfat_trashed'])): ?>
             <div class="notice notice-success is-dismissible"><p>Buchung in den Papierkorb verschoben.</p></div>
@@ -866,6 +902,9 @@ function rfat_render_overview_page() {
                                             <button type="button" class="button button-small" style="margin-left:4px;"
                                                     onclick="if(navigator.clipboard){navigator.clipboard.writeText('<?php echo esc_js($signal); ?>');this.textContent='Kopiert \u2713';}">Namen kopieren</button>
                                             <br />
+                                            <span style="color:#8a6d1f;">Nur ein Benutzername — in Signal in die Suche einfügen.
+                                                Für „In Signal öffnen" bräuchten wir den Signal-Link
+                                                (unter <em>Bearbeiten</em> nachtragbar).</span><br />
                                         <?php endif; ?>
                                     <?php endif; ?>
                                     <span style="color:<?php echo $keep ? '#5b6b62' : '#8a6d1f'; ?>;">
@@ -945,6 +984,31 @@ function rfat_render_overview_page() {
                                             <option value="<?php echo esc_attr($s); ?>" <?php selected($status, $s); ?>><?php echo esc_html(rfat_status_label($s)); ?></option>
                                         <?php endforeach; ?>
                                     </select>
+                                </p>
+
+                                <?php
+                                /*
+                                 * Signal von Hand eintragen dürfen.
+                                 *
+                                 * Kontaktdaten gehören dem Gast, deshalb steht die
+                                 * E-Mail hier bewusst nicht — sie trägt er selbst ein
+                                 * und löscht sie selbst. Beim Signal-Link ist es aber
+                                 * anders herum praktisch: Wer ihn am Telefon oder am
+                                 * Tresen durchgibt, kommt sonst nie zu dem Knopf, der
+                                 * den Chat wirklich öffnet. Leeres Feld heisst löschen.
+                                 */
+                                ?>
+                                <p>
+                                    <label style="display:block;font-weight:600;margin-bottom:2px;" for="rfat-signal-<?php echo esc_attr($p->ID); ?>">Signal-Link oder Benutzername</label>
+                                    <input type="text" id="rfat-signal-<?php echo esc_attr($p->ID); ?>" name="rfat_signal"
+                                           value="<?php echo esc_attr((string) get_post_meta($p->ID, RFAT_SIGNAL_META, true)); ?>"
+                                           placeholder="https://signal.me/#eu/… oder maxmuster.42"
+                                           style="width:100%;max-width:480px;" />
+                                    <span class="description" style="display:block;margin-top:2px;">
+                                        Nur der <strong>Link</strong> ergibt den Knopf „In Signal öffnen".
+                                        Beim blossen Benutzernamen bleibt es beim Kopieren und Suchen —
+                                        aus ihm lässt sich kein Link bauen. Leeren und speichern löscht die Angabe.
+                                    </span>
                                 </p>
 
                                 <p>
@@ -1657,18 +1721,19 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                        name="rfat_pub_email" placeholder="dein@beispiel.de"
                        value="<?php echo esc_attr($cur_email); ?>" />
 
-                <label class="rfat-pub-feld-label" for="rfat-signal-<?php echo esc_attr($post->ID); ?>">Signal-Benutzername oder -Link</label>
+                <label class="rfat-pub-feld-label" for="rfat-signal-<?php echo esc_attr($post->ID); ?>">Signal-Link oder Benutzername</label>
                 <input class="rfat-pub-code-input rfat-pub-mail-input" type="text"
                        id="rfat-signal-<?php echo esc_attr($post->ID); ?>"
-                       name="rfat_pub_signal" placeholder="maxmuster.42"
+                       name="rfat_pub_signal" placeholder="https://signal.me/#eu/… oder maxmuster.42"
                        autocapitalize="none" autocorrect="off" spellcheck="false"
                        value="<?php echo esc_attr($cur_signal); ?>" />
                 <p class="rfat-pub-feldhinweis">
-                    Nicht deine Telefonnummer – der <strong>Benutzername</strong>. Damit
-                    erreichen wir dich in Signal, ohne deine Nummer zu kennen. Beides findest du
-                    in Signal unter <em>Einstellungen &rarr; Profil &rarr; Benutzername</em>.
-                    Am einfachsten ist dort <em>Link kopieren</em> – mit dem Link können wir dich
-                    direkt anschreiben, beim Namen müssen wir dich erst suchen.
+                    Am besten dein <strong>Signal-Link</strong>: In Signal unter
+                    <em>Einstellungen &rarr; Profil &rarr; Benutzername</em> auf
+                    <em>Link kopieren</em> tippen und hier einfügen – damit können wir dich
+                    direkt anschreiben. Dein Benutzername (etwa <code>maxmuster.42</code>) geht
+                    auch, dann müssen wir dich erst suchen.
+                    Deine <strong>Telefonnummer brauchen wir in keinem Fall</strong>.
                 </p>
 
                 <label class="rfat-pub-keep">
