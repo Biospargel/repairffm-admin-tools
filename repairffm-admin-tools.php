@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.24.0
+ * Version: 1.25.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -2756,7 +2756,11 @@ add_action('wp_head', function () {
         }
         @media screen and (min-width: 783px) {
             body.admin-bar .rfat-topbar,
-            body.admin-bar .rfat-topbar.is-small {
+            body.admin-bar .rfat-topbar.is-small,
+            /* Das Overlay stand hier auf 46px, obwohl die Adminleiste ab
+               783px nur 32px hoch ist - 14px Seite blitzten oben durch.
+               Fiel nur angemeldeten Team-Mitgliedern auf. */
+            body.admin-bar .rfat-nav-overlay {
                 top: 32px;
             }
         }
@@ -2843,6 +2847,112 @@ add_action('wp_head', function () {
         /* Seite hinter dem offenen Menü nicht mitscrollen lassen */
         .rfat-nav-locked body {
             overflow: hidden;
+        }
+
+        /* ============ Breites Fenster: schwebendes Feld statt Vollbild ============
+         *
+         * Auf dem Handy ist das Vollbild richtig: Der Daumen braucht grosse
+         * Ziele, und Platz daneben gibt es nicht. Am Rechner ist es daneben
+         * - fuenf Menuepunkte legen sich ueber eine Seite, auf der genug
+         * Platz waere, und die Seite verschwindet fuer einen Klick, der sie
+         * gar nicht verlassen soll.
+         *
+         * Deshalb ab 782px: ein abgerundetes Feld, das unter dem Knopf
+         * rechts schwebt. Der Hintergrund bleibt liegen und faengt weiter
+         * Klicks ab - nur sieht man ihn nicht mehr, und ein Klick daneben
+         * schliesst wie zuvor.
+         *
+         * Aufgeklappt wird weiterhin per Klick, nicht beim Darueberfahren:
+         * Auf Touch-Geraeten mit breitem Fenster gibt es kein Hover, und
+         * ein Menue, das beim Vorbeiziehen der Maus aufspringt, trifft man
+         * aus Versehen oefter als absichtlich.
+         */
+        @media screen and (min-width: 782px) {
+            .rfat-nav-overlay {
+                background: transparent;
+                display: block;
+                overflow: visible;
+            }
+            /* Der Schliessen-Knopf steckt jetzt im Hamburger: Er wird zum X
+               und bleibt durch den durchsichtigen Hintergrund sichtbar.
+               Das Skript setzt den Fokus deshalb auf den ersten Menuepunkt. */
+            .rfat-nav-overlay__bar {
+                display: none;
+            }
+            .rfat-nav-overlay__list {
+                position: absolute;
+                top: 84px;
+                right: max(14px, env(safe-area-inset-right));
+                width: min(320px, calc(100vw - 28px));
+                max-height: calc(100vh - 120px);
+                overflow-y: auto;
+                box-sizing: border-box;
+                gap: 4px;
+                padding: 10px;
+                background: #fff;
+                border-radius: 20px;
+                box-shadow: 0 18px 44px rgba(20, 40, 30, .20),
+                            0 2px 8px rgba(20, 40, 30, .10);
+                transform-origin: top right;
+                transform: translateY(-6px) scale(.98);
+                opacity: 0;
+                transition: transform .16s ease, opacity .16s ease;
+            }
+            .rfat-nav-overlay.is-open .rfat-nav-overlay__list {
+                transform: none;
+                opacity: 1;
+            }
+            /*
+             * Der geschrumpfte Knopf sitzt hoeher, das Feld muss mit. Ueber
+             * den Nachbarschafts-Selektor statt ueber das Skript: Die Klasse
+             * steht schon an der Leiste, und das Overlay folgt ihr
+             * unmittelbar.
+             */
+            .rfat-topbar.is-small + .rfat-nav-overlay .rfat-nav-overlay__list {
+                top: 64px;
+            }
+            /*
+             * Im weissen Feld wirken weisse Kaertchen mit Rand wie Kaesten
+             * im Kasten. Hier tragen die Punkte nur ihren Hover.
+             */
+            .rfat-nav-overlay__list .rfat-nav-link {
+                padding: 11px 14px;
+                border-color: transparent;
+                border-radius: 12px;
+                background: transparent;
+                font-size: 16px;
+            }
+            /*
+             * Der durchsichtige Hintergrund oben steht weiter unten in der
+             * Datei als die Regeln fuer Hover und "du bist hier" und haette
+             * sie bei gleicher Spezifitaet ueberstimmt: Das Feld haette gar
+             * keinen Hover mehr gehabt - also genau das, was es ausmacht.
+             */
+            .rfat-nav-overlay__list .rfat-nav-link:hover,
+            .rfat-nav-overlay__list .rfat-nav-link:focus-visible,
+            .rfat-nav-overlay__list .rfat-nav-link.is-active {
+                background: #e8f1eb;
+                border-color: transparent;
+                color: #1f5a38;
+            }
+            .rfat-nav-overlay__list .rfat-nav-link.is-primary,
+            .rfat-nav-overlay__list .rfat-nav-link.is-primary:hover,
+            .rfat-nav-overlay__list .rfat-nav-link.is-primary:focus-visible {
+                background: #2f7d4f;
+                border-color: #2f7d4f;
+                color: #fff;
+            }
+            /* Ein schwebendes Feld ist kein Grund, die Seite festzuhalten -
+               und der verschwindende Rollbalken verschoebe das Layout. */
+            .rfat-nav-locked body {
+                overflow: visible;
+            }
+        }
+        @media (prefers-reduced-motion: reduce) {
+            .rfat-nav-overlay__list {
+                transition: none;
+                transform: none;
+            }
         }
 
         /*
@@ -4335,7 +4445,16 @@ add_action('wp_footer', function () {
             overlay.classList.add('is-open');
             openBtn.setAttribute('aria-expanded', 'true');
             document.documentElement.classList.add('rfat-nav-locked');
-            closeBtn.focus();
+            /*
+             * Ab 782px ist der Schliessen-Knopf ausgeblendet (das Feld
+             * schwebt, der Hamburger daneben ist das X). Ein ausgeblendeter
+             * Knopf nimmt keinen Fokus an — dann landet er auf dem ersten
+             * Menuepunkt, und die Tastatur kommt weiter ins Menue.
+             */
+            var start = closeBtn.offsetParent === null
+                ? overlay.querySelector('.rfat-nav-link')
+                : closeBtn;
+            if (start) { start.focus(); }
             document.addEventListener('keydown', onKeydown);
         }
 
@@ -4358,7 +4477,15 @@ add_action('wp_footer', function () {
             }
             if (event.key !== 'Tab') { return; }
             // Fokus im offenen Menü halten.
-            var focusable = overlay.querySelectorAll('a[href], button:not([disabled])');
+            /*
+             * Nur was sichtbar ist: Der ausgeblendete Schliessen-Knopf stuende
+             * sonst in der Liste, koennte den Fokus aber nicht annehmen — und
+             * damit fiele der Fokus beim Umlauf aus dem Menue heraus.
+             */
+            var focusable = Array.prototype.filter.call(
+                overlay.querySelectorAll('a[href], button:not([disabled])'),
+                function (el) { return el.offsetParent !== null; }
+            );
             if (!focusable.length) { return; }
             var first = focusable[0];
             var last = focusable[focusable.length - 1];
@@ -4377,10 +4504,13 @@ add_action('wp_footer', function () {
         overlay.addEventListener('click', function (event) {
             if (event.target === overlay) { closeMenu(); }
         });
-        // Beim Wechsel auf Desktop-Breite aufräumen.
-        window.addEventListener('resize', function () {
-            if (window.innerWidth > 600 && overlay.classList.contains('is-open')) { closeMenu(); }
-        });
+        /*
+         * Hier schloss ein resize-Haken das Menue, sobald das Fenster
+         * breiter als 600px wurde — aus der Zeit, als es das Menue nur auf
+         * dem Handy gab. Seit die Leiste die Navigation der ganzen Seite
+         * ist und das Feld auf dem Rechner schwebt, wuerde er das offene
+         * Menue beim Ziehen am Fensterrand wegnehmen. Ersatzlos weg.
+         */
     })();
     </script>
     <?php
