@@ -4,7 +4,7 @@
 bestehende Technik, das selbst gebaute Plugin, alle Design-Entscheidungen samt
 Begründung, sowie offene Punkte.
 
-Stand: 27.08.2026 · Plugin-Version 1.27.1
+Stand: 31.08.2026 · Plugin-Version 1.29.0
 
 ---
 
@@ -866,6 +866,49 @@ Ansicht", `RFAT_BEDIENUNG_ABSATZ`).
 
 ---
 
+### 3.16 Der Lage-Kasten (1.29.0)
+
+Entstanden aus der Frage „wurde viel probiert zu hacken oder zu buchen?" —
+und der Feststellung, dass sie sich nicht beantworten liess.
+
+Die Buchungssperre zählte seit 1.18.0 zwar mit, aber nur eine Gesamtzahl.
+Das beantwortet die Frage nicht, die man stellt, wenn einem mulmig wird:
+**Waren das vierzig über vier Wochen oder vierzig in einer Stunde?** Und
+Fehlanmeldungen zählte überhaupt niemand — WordPress meldet sie, merkt sie
+sich aber nicht.
+
+Der Kasten steht ganz oben in der Übersicht und zeigt drei Zeilen:
+
+| Zeile | Woraus |
+|---|---|
+| Buchungen | `wp_count_posts` — aktiv und im Papierkorb |
+| Abgewiesene Buchungsversuche | gesamt, 24 h, 7 Tage, aufgeschlüsselt nach *Kontingent voll* / *zu schnell* |
+| Fehlgeschlagene Anmeldungen | gesamt, 24 h, 7 Tage, davon mit **unbekanntem Benutzernamen** |
+
+Ein unbekannter Benutzername ist das Kennzeichen des Durchprobierens: Wer
+sein eigenes Passwort vertippt, trifft fast immer einen vorhandenen Namen.
+Deshalb genau diese eine Unterscheidung — **der Name selbst wird nicht
+gespeichert**, die Adresse auch nicht. Für die Aussage braucht es beides
+nicht.
+
+Die Zeitstempel-Listen sind auf **200** gedeckelt: Sie stehen in einer
+Option, die bei jedem Aufruf der Übersicht gelesen wird; bei einem Ansturm
+wären es sonst Zehntausende Zahlen in einem Feld. Für „wie viel war heute
+los" reichen 200 allemal.
+
+Die Bewertung (*unauffällig* / *auffällig viel*) ist bewusst grob und soll
+den Blick lenken, nicht Alarm schlagen: ab 10 Fehlanmeldungen oder 20
+abgewiesenen Buchungen in 24 Stunden. Zehn Fehlanmeldungen am Tag hat
+niemand, der nur sein Passwort vergisst.
+
+> **Es zählt ab dem Update.** Was vorher passiert ist, steht nicht drin —
+> dafür sind die Serverprotokolle und das Cloudflare-Dashboard zuständig.
+
+Der Altbestand aus 1.18.0 (nur `anzahl`, `zeit`, `grund`) stolpert nicht:
+Die Gesamtzahl läuft weiter, Aufschlüsselung und Zeitliste beginnen neu.
+
+---
+
 ---
 
 ## 4. Versionshistorie
@@ -919,6 +962,7 @@ Ansicht", `RFAT_BEDIENUNG_ABSATZ`).
 | 1.27.0 | Die drei Termin-Aktionen als **runde Zeilen** in der Sprache der Karte darüber |
 | 1.27.1 | Mail-Fehler klarer gedeutet: Microsofts SMTP-Sperre, falsche Absenderadresse, dichtes Container-Netz |
 | 1.28.0 | **Fünf Sprachen** (de/en/tr/ar/uk) und **Bedienung für alle**: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Fokus (siehe 3.15) |
+| 1.29.0 | **Lage-Kasten** in der Übersicht: Buchungen, abgewiesene Versuche, fehlgeschlagene Anmeldungen (siehe 3.16) |
 
 ---
 

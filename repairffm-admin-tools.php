@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern. (4) Mehrsprachig (Deutsch, Englisch, Türkisch, Arabisch, Ukrainisch) und für alle bedienbar: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Tastaturfokus – die Wahl bleibt im Browser, nichts davon erreicht den Server.
- * Version: 1.28.0
+ * Version: 1.29.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1059,6 +1059,51 @@ function rfat_platzhalter_finden() {
     return $treffer;
 }
 
+/**
+ * Die Lage in Zahlen: Buchungen, abgewiesene Versuche, fehlgeschlagene
+ * Anmeldungen.
+ *
+ * Alles aus dem, was ohnehin mitgezaehlt wird — ohne Adressen, ohne Namen.
+ * Die Bewertung am Ende ist bewusst grob: Sie soll den Blick lenken, nicht
+ * Alarm schlagen.
+ */
+function rfat_lage() {
+    $limit = get_option(RFAT_LIMIT_LOG);
+    $login = get_option(RFAT_LOGIN_LOG);
+    $limit = is_array($limit) ? $limit : [];
+    $login = is_array($login) ? $login : [];
+
+    $buchungen = wp_count_posts('rc_booking');
+
+    $lage = [
+        'buchungen'      => (int) ($buchungen->publish ?? 0),
+        'papierkorb'     => (int) ($buchungen->trash ?? 0),
+
+        'abgewiesen'     => (int) ($limit['anzahl'] ?? 0),
+        'abgewiesen_24h' => rfat_zeiten_zaehlen($limit['zeiten'] ?? [], DAY_IN_SECONDS),
+        'abgewiesen_7t'  => rfat_zeiten_zaehlen($limit['zeiten'] ?? [], 7 * DAY_IN_SECONDS),
+        'voll'           => (int) ($limit['nach_grund']['zuviel'] ?? 0),
+        'zuschnell'      => (int) ($limit['nach_grund']['zuschnell'] ?? 0),
+        'abgewiesen_zeit' => (int) ($limit['zeit'] ?? 0),
+
+        'anmeldungen'     => (int) ($login['anzahl'] ?? 0),
+        'anmeldungen_24h' => rfat_zeiten_zaehlen($login['zeiten'] ?? [], DAY_IN_SECONDS),
+        'anmeldungen_7t'  => rfat_zeiten_zaehlen($login['zeiten'] ?? [], 7 * DAY_IN_SECONDS),
+        'unbekannt'       => (int) ($login['unbekannt'] ?? 0),
+        'anmeldungen_zeit' => (int) ($login['zeit'] ?? 0),
+    ];
+
+    /*
+     * Die Schwellen sind Erfahrungswerte fuer eine kleine Werkstattseite,
+     * keine Wissenschaft. Zehn Fehlanmeldungen am Tag hat niemand, der
+     * nur sein Passwort vergisst; zwanzig abgewiesene Buchungen am Tag
+     * sind kein Publikumsandrang.
+     */
+    $lage['auffaellig'] = ($lage['anmeldungen_24h'] >= 10 || $lage['abgewiesen_24h'] >= 20);
+
+    return $lage;
+}
+
 function rfat_render_overview_page() {
     if (!current_user_can('manage_options')) {
         wp_die('Keine Berechtigung.');
@@ -1148,6 +1193,62 @@ function rfat_render_overview_page() {
         <?php if (isset($_GET['rfat_limit_saved'])): ?>
             <div class="notice notice-success is-dismissible"><p>Buchungsgrenze gespeichert.</p></div>
         <?php endif; ?>
+        <?php
+        $lage = rfat_lage();
+        $stand = function ($wann) {
+            return $wann ? wp_date('d.m.Y H:i', $wann) : '–';
+        };
+        ?>
+        <div class="notice notice-<?php echo $lage['auffaellig'] ? 'warning' : 'info'; ?>" style="padding:12px 14px;">
+            <p style="margin:0 0 8px;"><strong>Lage</strong>
+                <?php if ($lage['auffaellig']): ?>
+                    — <span style="color:#b3402f;font-weight:600;">in den letzten 24 Stunden auffällig viel</span>
+                <?php else: ?>
+                    — unauffällig
+                <?php endif; ?>
+            </p>
+            <table class="widefat striped" style="max-width:720px;">
+                <tbody>
+                    <tr>
+                        <td style="width:38%;"><strong>Buchungen</strong></td>
+                        <td><?php echo (int) $lage['buchungen']; ?> aktiv,
+                            <?php echo (int) $lage['papierkorb']; ?> im Papierkorb (storniert oder abgelehnt)</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Abgewiesene Buchungsversuche</strong></td>
+                        <td>
+                            <?php echo (int) $lage['abgewiesen']; ?> insgesamt
+                            — <strong><?php echo (int) $lage['abgewiesen_24h']; ?></strong> in 24 Stunden,
+                            <?php echo (int) $lage['abgewiesen_7t']; ?> in 7 Tagen<br />
+                            <span class="description">
+                                Kontingent voll: <?php echo (int) $lage['voll']; ?> ·
+                                zu schnell hintereinander: <?php echo (int) $lage['zuschnell']; ?> ·
+                                zuletzt <?php echo esc_html($stand($lage['abgewiesen_zeit'])); ?>
+                            </span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td><strong>Fehlgeschlagene Anmeldungen</strong></td>
+                        <td>
+                            <?php echo (int) $lage['anmeldungen']; ?> insgesamt
+                            — <strong><?php echo (int) $lage['anmeldungen_24h']; ?></strong> in 24 Stunden,
+                            <?php echo (int) $lage['anmeldungen_7t']; ?> in 7 Tagen<br />
+                            <span class="description">
+                                davon mit unbekanntem Benutzernamen: <?php echo (int) $lage['unbekannt']; ?> ·
+                                zuletzt <?php echo esc_html($stand($lage['anmeldungen_zeit'])); ?>
+                            </span>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            <p class="description" style="margin:8px 0 0;">
+                Gezählt wird seit dem Update auf 1.28.0 — Älteres steht hier nicht.
+                Gespeichert sind nur Anzahl und Zeitpunkt: <strong>keine Adressen, keine Benutzernamen</strong>.
+                Ein unbekannter Benutzername ist das Kennzeichen des Durchprobierens; wer sein eigenes
+                Passwort vertippt, trifft fast immer einen vorhandenen Namen.
+            </p>
+        </div>
+
         <?php $platzhalter = rfat_platzhalter_finden(); ?>
         <?php if ($platzhalter): ?>
             <div class="notice notice-warning">
@@ -7208,13 +7309,92 @@ function rfat_buchung_vermerken($post_id, $kennung) {
 function rfat_limit_vermerken($grund) {
     $log = get_option(RFAT_LIMIT_LOG);
     if (!is_array($log)) {
-        $log = ['anzahl' => 0, 'zeit' => 0, 'grund' => ''];
+        $log = [];
     }
-    $log['anzahl'] = (int) $log['anzahl'] + 1;
+    $log['anzahl'] = (int) ($log['anzahl'] ?? 0) + 1;
     $log['zeit']   = time();
     $log['grund']  = $grund;
+
+    /*
+     * Seit 1.28.0 zusaetzlich aufgeschluesselt und mit Zeitstempeln.
+     *
+     * „Insgesamt 40 abgewiesen" beantwortet die Frage nicht, die man
+     * stellt, wenn es einem mulmig wird: Waren das vierzig ueber vier
+     * Wochen verteilt, oder vierzig in einer Stunde? Und lag es am
+     * Kontingent oder am Takt? Erst beides zusammen macht aus einer Zahl
+     * eine Lage.
+     */
+    $nach = isset($log['nach_grund']) && is_array($log['nach_grund']) ? $log['nach_grund'] : [];
+    $nach[$grund] = (int) ($nach[$grund] ?? 0) + 1;
+    $log['nach_grund'] = $nach;
+    $log['zeiten'] = rfat_zeiten_anhaengen($log['zeiten'] ?? [], time());
+
     update_option(RFAT_LIMIT_LOG, $log, false);
 }
+
+/**
+ * Einen Zeitstempel anhaengen und die Liste deckeln.
+ *
+ * Gedeckelt, weil die Liste in einer Option steht: Bei einem Ansturm
+ * waeren es sonst Zehntausende Zahlen in einem Feld, das bei jedem Aufruf
+ * gelesen wird. 200 reichen fuer „wie viel war heute los" allemal.
+ */
+function rfat_zeiten_anhaengen($zeiten, $wann) {
+    if (!is_array($zeiten)) {
+        $zeiten = [];
+    }
+    $zeiten[] = (int) $wann;
+    return count($zeiten) > 200 ? array_slice($zeiten, -200) : $zeiten;
+}
+
+/**
+ * Wie viele der Zeitstempel liegen in den letzten $sekunden?
+ */
+function rfat_zeiten_zaehlen($zeiten, $sekunden) {
+    if (!is_array($zeiten)) {
+        return 0;
+    }
+    $grenze = time() - (int) $sekunden;
+    $treffer = 0;
+    foreach ($zeiten as $wann) {
+        if ((int) $wann >= $grenze) {
+            $treffer++;
+        }
+    }
+    return $treffer;
+}
+
+/*
+ * Fehlgeschlagene Anmeldungen zaehlen.
+ *
+ * WordPress meldet sie, merkt sie sich aber nicht. Wer wissen will, ob an
+ * seiner Tuer geruettelt wurde, hat ohne das keine Antwort — und genau die
+ * Frage kommt, sobald einem etwas seltsam vorkommt.
+ *
+ * Gespeichert werden Anzahl, Zeitpunkte und eine einzige Unterscheidung:
+ * ob der versuchte Benutzername ueberhaupt existiert. Ein unbekannter Name
+ * ist das Kennzeichen des Durchprobierens — echte Vertipper treffen fast
+ * immer einen vorhandenen Namen. **Der Name selbst wird nicht gespeichert**,
+ * und die Adresse auch nicht: Beides braucht es fuer diese Aussage nicht.
+ */
+define('RFAT_LOGIN_LOG', 'rfat_login_log');
+
+add_action('wp_login_failed', function ($benutzername) {
+    $log = get_option(RFAT_LOGIN_LOG);
+    if (!is_array($log)) {
+        $log = [];
+    }
+    $log['anzahl'] = (int) ($log['anzahl'] ?? 0) + 1;
+    $log['zeit']   = time();
+
+    $name = (string) $benutzername;
+    if ($name !== '' && !get_user_by('login', $name) && !get_user_by('email', $name)) {
+        $log['unbekannt'] = (int) ($log['unbekannt'] ?? 0) + 1;
+    }
+
+    $log['zeiten'] = rfat_zeiten_anhaengen($log['zeiten'] ?? [], time());
+    update_option(RFAT_LOGIN_LOG, $log, false);
+});
 
 /*
  * Storniert heißt weg: Mit dem Termin entfällt der Zweck, für den der
