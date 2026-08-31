@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern. (4) Mehrsprachig (Deutsch, Englisch, Türkisch, Arabisch, Ukrainisch) und für alle bedienbar: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Tastaturfokus – die Wahl bleibt im Browser, nichts davon erreicht den Server.
- * Version: 1.29.0
+ * Version: 1.29.1
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -3840,6 +3840,15 @@ function rfat_ansicht_farben($ansicht) {
             --rfat-fehler-text: #f7bcb0;
             --rfat-schatten: rgba(0, 0, 0, .45);
             --rfat-fokus: #ffffff;
+            /*
+             * Zwei Flaechen, die das Theme selbst faerbt und die deshalb
+             * hier mitmuessen: der Verlauf hinter dem Hero und der
+             * Seitenfuss. Der Fuss ist schon im hellen Modus dunkel
+             * (`background: var(--ink)`) — wuerde er einfach mitgedreht,
+             * waere er im Dunkelmodus hell mit heller Schrift.
+             */
+            --rfat-hero: linear-gradient(160deg, #1c2f24 0%, #141a17 100%);
+            --rfat-fuss: #0b110e;
         ';
     }
 
@@ -3869,6 +3878,8 @@ function rfat_ansicht_farben($ansicht) {
             --rfat-fehler-text: #7a0000;
             --rfat-schatten: transparent;
             --rfat-fokus: #000000;
+            --rfat-hero: #ffffff;
+            --rfat-fuss: #000000;
         ';
     }
 
@@ -3898,51 +3909,9 @@ function rfat_ansicht_farben($ansicht) {
         --rfat-fehler-text: #7a1010;
         --rfat-schatten: rgba(31, 47, 39, .06);
         --rfat-fokus: #10241a;
+        --rfat-hero: linear-gradient(160deg, #e8f1eb 0%, #f6f4ee 100%);
+        --rfat-fuss: #1c2a22;
     ';
-}
-
-/**
- * Die Flaeche der Seite selbst — nicht nur die Bauteile dieses Plugins.
- *
- * Das Theme kennen wir nicht. Was wir kennen, sind die Klassen, die
- * WordPress an Bloecke haengt: Ein Block, dem im Editor eine eigene
- * Hintergrundfarbe gegeben wurde (`has-background`, `wp-block-cover` —
- * hier der Verlauf hinter dem Hero), behaelt diese Flaeche. Sie
- * umzufaerben hiesse raten; darum bekommt sie ihre dunkle Schrift zurueck,
- * damit dort nichts Helles auf Hellem steht.
- */
-function rfat_ansicht_seite_css($wurzel) {
-    return "
-        {$wurzel} body {
-            background-color: var(--rfat-grund);
-            color: var(--rfat-text);
-        }
-        {$wurzel} h1, {$wurzel} h2, {$wurzel} h3,
-        {$wurzel} h4, {$wurzel} h5, {$wurzel} h6 {
-            color: var(--rfat-text);
-        }
-        {$wurzel} a:not(.btn):not(.rfat-nav-link):not(.rfat-pub-zeile):not(.rc-cat):not(.rc-slot):not(.rc-btn) {
-            color: var(--rfat-gruen-text);
-        }
-        {$wurzel} hr, {$wurzel} table, {$wurzel} th, {$wurzel} td {
-            border-color: var(--rfat-rand);
-        }
-        {$wurzel} input, {$wurzel} textarea, {$wurzel} select {
-            background-color: var(--rfat-flaeche);
-            color: var(--rfat-text);
-            border-color: var(--rfat-rand-stark);
-        }
-        {$wurzel} ::placeholder { color: var(--rfat-leiser); opacity: 1; }
-        {$wurzel} code, {$wurzel} pre {
-            background-color: var(--rfat-flaeche-2);
-            color: var(--rfat-text);
-        }
-        /* Bloecke mit eigener Hintergrundfarbe: siehe Kommentar oben. */
-        {$wurzel} .has-background:not(.has-text-color),
-        {$wurzel} .wp-block-cover:not(.has-text-color) { color: #1c2a22; }
-        {$wurzel} .has-background a:not(.btn):not(.wp-block-button__link),
-        {$wurzel} .wp-block-cover a:not(.btn):not(.wp-block-button__link) { color: #1f5a38; }
-    ";
 }
 
 /**
@@ -3964,7 +3933,7 @@ function rfat_kontrast_regeln($wurzel) {
         {$wurzel} .rfat-pub-mail,
         {$wurzel} .rfat-pub-share,
         {$wurzel} .rfat-nav-link,
-        {$wurzel} .rfat-bedienung,
+        {$wurzel} .rfat-bedienung__wahl > *,
         {$wurzel} .rc-cat,
         {$wurzel} .rc-slot,
         {$wurzel} .rfat-pub-code-input {
@@ -3978,9 +3947,129 @@ function rfat_kontrast_regeln($wurzel) {
         }
         /* Links nur an der Farbe zu erkennen, reicht bei Farbsehschwaeche nicht. */
         {$wurzel} a { text-decoration: underline; }
+        /*
+         * Nicht unterstrichen wird, was ohnehin wie ein Knopf aussieht:
+         * Eine unterstrichene Zeile quer durch eine umrandete Kachel liest
+         * sich als Fehler, nicht als Link. Der Rahmen sagt hier schon, dass
+         * man draufdruecken kann.
+         */
         {$wurzel} .btn,
         {$wurzel} .rfat-nav-link,
-        {$wurzel} .rfat-pub-zeile { text-decoration: none; }
+        {$wurzel} .rfat-bedienung__wahl > *,
+        {$wurzel} .rfat-pub-zeile,
+        {$wurzel} .rc-cat,
+        {$wurzel} .rc-slot,
+        {$wurzel} .rc-btn,
+        {$wurzel} .wp-element-button,
+        {$wurzel} .wp-block-button__link { text-decoration: none; }
+    ";
+}
+
+/**
+ * Laeuft die Seite auf unserem eigenen Theme?
+ *
+ * Der Dunkelmodus unten greift in die Variablen von `repairffm-block`.
+ * Das ist erlaubt — Theme und Plugin gehoeren zum selben Projekt, und
+ * dieses Plugin nimmt dem Theme ohnehin schon das Menue ab. Bei einem
+ * fremden Theme waere es geraten, und geraten wurde hier schon einmal:
+ * Fassung 1.28.0 hat `body` dunkel gefaerbt und die Ueberschriften hell,
+ * ohne zu wissen, dass `.page-body` mit `background:#fff` darueberliegt.
+ * Ergebnis war heller Text auf weissem Grund.
+ */
+function rfat_eigenes_theme() {
+    if (!function_exists('wp_get_theme')) {
+        return false;
+    }
+    $theme = wp_get_theme();
+    return $theme->get_stylesheet() === 'repairffm-block'
+        || $theme->get_template() === 'repairffm-block';
+}
+
+/**
+ * Das Theme mitdrehen.
+ *
+ * `repairffm-block` rechnet selbst in Variablen (`--ink`, `--sand`,
+ * `--white`, `--line`, `--muted`, `--green*`) und WordPress stellt
+ * dieselben Farben noch einmal als `--wp--preset--color--…` bereit.
+ * Beide Saetze hier auf unsere Tokens zu legen, faerbt die ganze Seite —
+ * Kopf, Karten, Fliesstext, Raender — ohne eine einzige geratene Regel.
+ *
+ * Was uebrig bleibt, sind fuenf Stellen, an denen das Theme `#fff` direkt
+ * hinschreibt (nachgezaehlt in seiner style.css, 97 Zeilen). Die stehen
+ * hier einzeln.
+ *
+ * Weil alles aus den Tokens kommt, gilt dieselbe Funktion fuer „dunkel"
+ * und fuer „hoher Kontrast" — die Werte stecken in rfat_ansicht_farben().
+ */
+function rfat_theme_regeln($wurzel) {
+    return "
+        {$wurzel} {
+            --white: var(--rfat-flaeche);
+            --sand: var(--rfat-grund);
+            --ink: var(--rfat-text);
+            --muted: var(--rfat-leise);
+            --line: var(--rfat-rand);
+            --green: var(--rfat-gruen);
+            --green-dark: var(--rfat-gruen-text);
+            --green-soft: var(--rfat-gruen-flaeche);
+            --shadow: 0 6px 24px var(--rfat-schatten);
+
+            --wp--preset--color--white: var(--rfat-flaeche);
+            --wp--preset--color--sand: var(--rfat-grund);
+            --wp--preset--color--ink: var(--rfat-text);
+            --wp--preset--color--muted: var(--rfat-leise);
+            --wp--preset--color--line: var(--rfat-rand);
+            --wp--preset--color--green: var(--rfat-gruen);
+            --wp--preset--color--green-dark: var(--rfat-gruen-text);
+            --wp--preset--color--green-soft: var(--rfat-gruen-flaeche);
+            --wp--preset--gradient--hero: var(--rfat-hero);
+        }
+
+        /* Die Stellen, an denen das Theme die Farbe direkt hinschreibt. */
+        {$wurzel} .page-body,
+        {$wurzel} .split-section { background: var(--rfat-grund); }
+        {$wurzel} .card,
+        {$wurzel} .panel,
+        {$wurzel} .hero .pill { background: var(--rfat-flaeche); }
+        {$wurzel} .site-footer { background: var(--rfat-fuss); }
+
+        /*
+         * Die Knoepfe des Themes tragen ihr Weiss fest im Stylesheet von
+         * WordPress (`:root :where(.wp-element-button){color:#ffffff}`).
+         * Auf dem hellen Gruen des Dunkelmodus waere das ein Verhaeltnis
+         * von gut 2:1 — dieselbe Falle wie bei unserem eigenen .btn.
+         */
+        {$wurzel} .wp-element-button,
+        {$wurzel} .wp-block-button__link,
+        {$wurzel} .wp-element-button:hover,
+        {$wurzel} .wp-block-button__link:hover,
+        {$wurzel} .wp-element-button:focus,
+        {$wurzel} .wp-block-button__link:focus { color: var(--rfat-auf-gruen); }
+        /*
+         * Ausser den Menuepunkten im Seitenkopf: Die sind auch
+         * `.wp-block-button__link`, stehen aber auf durchsichtigem Grund.
+         * Dieses Plugin raeumt sie zwar weg — die Regel kostet nichts und
+         * faengt den Fall ab, dass es das einmal nicht tut.
+         */
+        {$wurzel} .nav .navlink .wp-block-button__link { color: var(--rfat-text); }
+
+        /*
+         * Bloecke, denen im Seiten-Editor spaeter einmal eine eigene
+         * Hintergrundfarbe gegeben wird: Welche das ist, wissen wir nicht,
+         * also bleibt sie — und mit ihr die dunkle Schrift, die dazu
+         * gehoert. Der Hero ist ausgenommen, seinen Verlauf drehen wir
+         * oben ueber `--rfat-hero` selbst mit.
+         */
+        {$wurzel} .has-background:not(.has-hero-gradient-background):not(.has-text-color),
+        {$wurzel} .wp-block-cover:not(.has-text-color) {
+            --ink: #1c2a22;
+            --muted: #5b6b62;
+            --line: #dfe4e0;
+            --white: #ffffff;
+            --green-soft: #e8f1eb;
+            --green-dark: #1f5a38;
+            color: #1c2a22;
+        }
     ";
 }
 
@@ -3989,6 +4078,7 @@ add_action('wp_head', function () {
         return;
     }
 
+    $eigenes  = rfat_eigenes_theme();
     $hell     = rfat_ansicht_farben('hell');
     $dunkel   = rfat_ansicht_farben('dunkel');
     $kontrast = rfat_ansicht_farben('kontrast');
@@ -4020,7 +4110,7 @@ add_action('wp_head', function () {
 
         @media (prefers-color-scheme: dark) {
             <?php echo $frei; ?> { <?php echo $dunkel; ?> }
-            <?php echo rfat_ansicht_seite_css($frei); ?>
+            <?php if ($eigenes) { echo rfat_theme_regeln($frei); } ?>
         }
         /*
          * Wer im Betriebssystem „mehr Kontrast" eingestellt hat, hat die
@@ -4030,12 +4120,16 @@ add_action('wp_head', function () {
         @media (prefers-contrast: more) {
             <?php echo $frei; ?> { <?php echo $kontrast; ?> }
             <?php echo rfat_kontrast_regeln($frei); ?>
+            <?php if ($eigenes) { echo rfat_theme_regeln($frei); } ?>
         }
 
         :root[data-rfat-ansicht="hell"] { <?php echo $hell; ?> }
         :root[data-rfat-ansicht="dunkel"] { <?php echo $dunkel; ?> }
-        <?php echo rfat_ansicht_seite_css(':root[data-rfat-ansicht="dunkel"]'); ?>
         :root[data-rfat-ansicht="kontrast"] { <?php echo $kontrast; ?> }
+        <?php if ($eigenes) {
+            echo rfat_theme_regeln(':root[data-rfat-ansicht="dunkel"]');
+            echo rfat_theme_regeln(':root[data-rfat-ansicht="kontrast"]');
+        } ?>
 
         <?php echo rfat_kontrast_regeln(':root[data-rfat-ansicht="kontrast"]'); ?>
 
@@ -4113,6 +4207,7 @@ add_action('wp_head', function () {
         :root[data-rfat-schrift] .rfat-pub-frage textarea,
         :root[data-rfat-schrift] .rfat-pub-notiz textarea { font-size: calc(16px * var(--rfat-skala)); }
         :root[data-rfat-schrift] .rfat-nav-link { font-size: calc(19px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-bedienung__wahl > * { font-size: calc(15px * var(--rfat-skala)); }
         :root[data-rfat-schrift] .rc-h { font-size: calc(22px * var(--rfat-skala)); }
         :root[data-rfat-schrift] .rc-cat,
         :root[data-rfat-schrift] .rc-btn { font-size: calc(17px * var(--rfat-skala)); }
@@ -4120,7 +4215,6 @@ add_action('wp_head', function () {
         :root[data-rfat-schrift] .rc-hint,
         :root[data-rfat-schrift] .rc-back a { font-size: calc(15px * var(--rfat-skala)); }
         :root[data-rfat-schrift] .rc-steps li { font-size: calc(13px * var(--rfat-skala)); }
-        :root[data-rfat-schrift] .rfat-bedienung { font-size: calc(15px * var(--rfat-skala)); }
 
         /* ============ Von rechts nach links (Arabisch) ============
          *
@@ -4135,14 +4229,6 @@ add_action('wp_head', function () {
         [dir="rtl"] .rfat-pub-frage { border-left: 0; border-right: 4px solid var(--rfat-warn); }
         [dir="rtl"] .rc-error { border-left: 0; border-right: 4px solid var(--rfat-fehler); }
         [dir="rtl"] .rfat-nav-overlay__bar { justify-content: flex-start; }
-        /*
-         * Das Bedienfeld haengt am Knopf, und der steht bei rechtslaeufiger
-         * Schrift links — auf jeder Fenstergroesse, nicht erst am Rechner.
-         */
-        [dir="rtl"] .rfat-bedienung {
-            right: auto;
-            left: max(14px, env(safe-area-inset-left));
-        }
         @media (min-width: 783px) {
             [dir="rtl"] .rfat-nav-overlay__list {
                 right: auto;
@@ -4159,8 +4245,6 @@ add_action('wp_head', function () {
          * aus. Ein Blenden bleibt, es bewegt sich nur nichts mehr.
          */
         @media (prefers-reduced-motion: reduce) {
-            .rfat-bedienung,
-            .rfat-bedienung__knopf,
             .rfat-nav-overlay,
             .rfat-nav-overlay__list,
             .rfat-pub-zeile,
@@ -4170,58 +4254,28 @@ add_action('wp_head', function () {
             }
         }
 
-        /* ============ Das Feld „Sprache & Ansicht" ============ */
-        .rfat-topbar__gruppe { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
-        .rfat-bedienung__knopf {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-            min-width: 48px;
-            height: 48px;
-            padding: 0 12px;
-            border: 1px solid var(--rfat-rand-stark);
-            border-radius: 999px;
-            background: var(--rfat-flaeche);
-            color: var(--rfat-text);
-            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            font-size: 14px;
-            font-weight: 700;
-            line-height: 1;
-            cursor: pointer;
-            box-shadow: 0 2px 8px rgba(20, 40, 30, .18);
-            transition: background .15s ease, border-color .15s ease;
+        /* ============ Sprache & Ansicht im Menue ============
+         *
+         * Kein eigenes schwebendes Feld mehr (siehe den Kommentar an der
+         * Leiste unten): zwei Bloecke im Menue-Overlay, oben die Sprachen,
+         * unten Ansicht und Schrift.
+         */
+        .rfat-bedienung { padding: 4px 22px; }
+        .rfat-bedienung--oben { padding-bottom: 12px; }
+        .rfat-bedienung--oben .rfat-bedienung__gruppe { margin-bottom: 0; }
+        .rfat-bedienung--unten {
+            margin-top: 16px;
+            padding-top: 16px;
+            padding-bottom: 22px;
+            border-top: 1px solid var(--rfat-rand);
         }
-        .rfat-bedienung__knopf:hover { border-color: var(--rfat-gruen); }
-        .rfat-bedienung__kuerzel { text-transform: uppercase; letter-spacing: .04em; }
-        .rfat-topbar.is-small .rfat-bedienung__knopf { min-width: 42px; height: 42px; }
-
-        .rfat-bedienung {
-            position: fixed;
-            z-index: 99999;
-            top: 74px;
-            right: max(14px, env(safe-area-inset-right));
-            width: min(320px, calc(100vw - 28px));
-            max-height: calc(100vh - 110px);
-            overflow-y: auto;
-            box-sizing: border-box;
-            padding: 16px 18px 18px;
-            background: var(--rfat-flaeche);
-            color: var(--rfat-text);
-            border: 1px solid var(--rfat-rand);
-            border-radius: 20px;
-            box-shadow: 0 18px 44px rgba(20, 40, 30, .20), 0 2px 8px rgba(20, 40, 30, .10);
-            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-            font-size: 15px;
-            line-height: 1.45;
-        }
-        .rfat-bedienung[hidden] { display: none; }
-        .rfat-bedienung__gruppe { border: 0; margin: 0 0 16px; padding: 0; }
+        .rfat-bedienung__gruppe { border: 0; margin: 0 0 14px; padding: 0; min-width: 0; }
         .rfat-bedienung__gruppe:last-of-type { margin-bottom: 10px; }
         .rfat-bedienung__titel {
             display: block;
             margin: 0 0 8px;
             padding: 0;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             font-size: 12px;
             font-weight: 700;
             letter-spacing: .06em;
@@ -4233,16 +4287,35 @@ add_action('wp_head', function () {
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            /*
+             * 44 Pixel: die Groesse, unter der eine Flaeche mit dem Daumen
+             * nicht mehr sicher zu treffen ist. Gilt fuer die Sprachchips
+             * genauso wie fuer die Schalter darunter.
+             */
             min-height: 44px;
             padding: 8px 14px;
             border: 1px solid var(--rfat-rand-stark);
             border-radius: 12px;
             background: var(--rfat-flaeche);
             color: var(--rfat-text);
-            font: inherit;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 15px;
             font-weight: 600;
+            line-height: 1.2;
             text-decoration: none;
             cursor: pointer;
+        }
+        .rfat-bedienung__titel svg { vertical-align: -2px; margin-right: 5px; }
+        /*
+         * Die Sprachen etwas enger als die Schalter darunter: Fuenf Namen
+         * sollen in zwei Reihen passen, ohne die Menuepunkte unter den
+         * Bildschirmrand zu schieben. Die 44 Pixel Hoehe bleiben — an der
+         * Trefferflaeche wird nicht gespart.
+         */
+        .rfat-bedienung--oben .rfat-bedienung__wahl { gap: 6px; }
+        .rfat-bedienung--oben .rfat-bedienung__wahl > * {
+            padding: 6px 11px;
+            font-size: 14px;
         }
         .rfat-bedienung__wahl > *:hover { border-color: var(--rfat-gruen); }
         .rfat-bedienung__wahl [aria-current="true"],
@@ -4252,7 +4325,8 @@ add_action('wp_head', function () {
             color: var(--rfat-auf-gruen);
         }
         .rfat-bedienung__hinweis {
-            margin: 0;
+            margin: 0 0 6px;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             font-size: 12px;
             line-height: 1.5;
             color: var(--rfat-leise);
@@ -4260,7 +4334,9 @@ add_action('wp_head', function () {
         .rfat-bedienung__ab {
             display: block;
             margin: 10px 0 0;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             font-size: 12px;
+            line-height: 1.5;
             color: var(--rfat-leise);
         }
 
@@ -5765,33 +5841,25 @@ add_action('wp_footer', function () {
         $current   = $permalink ? untrailingslashit($permalink) : '';
     }
     ?>
+    <?php
+    /*
+     * Ein Knopf, nicht zwei.
+     *
+     * 1.28.0 hatte hier den Hamburger UND einen Knopf „DE" fuer Sprache
+     * und Ansicht. Auf dem Handy lag der zweite ueber dem Untertitel im
+     * Seitenkopf („Reparieren statt Wegwerfen"): Die Leiste schwebt, der
+     * Kopf des Themes liegt darunter, und breiter darf sie dort nicht
+     * werden. Sprache und Ansicht stehen deshalb im Menue — gleich oben,
+     * mit den Sprachnamen in ihrer eigenen Schrift.
+     */
+    $rfat_sprache_jetzt = rfat_sprache();
+    ?>
     <div class="rfat-topbar" id="rfat-topbar" hidden>
-        <div class="rfat-topbar__gruppe">
-            <?php
-            /*
-             * Sprache und Ansicht neben dem Menue, nicht darin: Wer die
-             * Seite nicht lesen kann, findet einen Punkt „Sprache" in einem
-             * deutschen Menue nicht — er muss das Menue ja erst oeffnen und
-             * dann lesen. Ein eigener Knopf mit dem Sprachkuerzel drauf
-             * („DE", „TR") ist ohne ein Wort Deutsch zu verstehen.
-             */
-            $rfat_sprache_jetzt = rfat_sprache();
-            ?>
-            <button type="button" class="rfat-bedienung__knopf" id="rfat-bedienung-open"
-                    aria-expanded="false" aria-controls="rfat-bedienung"
-                    aria-label="<?php echo esc_attr(rfat_t('ui.bedienung', 'Sprache und Ansicht')); ?>">
-                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
-                          d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
-                </svg>
-                <span class="rfat-bedienung__kuerzel"><?php echo esc_html($rfat_sprache_jetzt); ?></span>
-            </button>
-            <button type="button" class="rfat-nav-open" id="rfat-nav-open"
-                    aria-label="<?php echo esc_attr(rfat_t('ui.menue_oeffnen', 'Menü öffnen')); ?>"
-                    aria-expanded="false" aria-controls="rfat-nav-overlay">
-                <span class="rfat-burger" aria-hidden="true"><span></span><span></span><span></span></span>
-            </button>
-        </div>
+        <button type="button" class="rfat-nav-open" id="rfat-nav-open"
+                aria-label="<?php echo esc_attr(rfat_t('ui.menue_oeffnen', 'Menü öffnen')); ?>"
+                aria-expanded="false" aria-controls="rfat-nav-overlay">
+            <span class="rfat-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
     </div>
 
     <div class="rfat-nav-overlay" id="rfat-nav-overlay" hidden>
@@ -5803,6 +5871,44 @@ add_action('wp_footer', function () {
                 </svg>
             </button>
         </div>
+        <?php
+        /*
+         * Sprache ganz oben, noch vor den Menuepunkten.
+         *
+         * Wer kein Deutsch liest, oeffnet das Menue am Hamburger — der ist
+         * ueberall derselbe — und muss die Sprachnamen dann sofort sehen.
+         * „Termin buchen" bleibt trotzdem der auffaelligste Punkt: eine
+         * Reihe kleiner Chips gegen einen grossen gruenen Knopf.
+         *
+         * Die Sprachen sind Links und keine Schalter: Sie fuehren auf
+         * dieselbe Seite mit `?sprache=…`, funktionieren also auch ohne
+         * JavaScript, und lassen sich weitergeben. Ansicht und Schrift
+         * koennen das nicht — sie stehen nur im Browser und nirgends sonst.
+         */
+        ?>
+        <div class="rfat-bedienung rfat-bedienung--oben">
+        <fieldset class="rfat-bedienung__gruppe">
+            <legend class="rfat-bedienung__titel">
+                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+                          d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+                </svg>
+                <?php rfat_e('ui.sprache', 'Sprache'); ?>
+            </legend>
+            <div class="rfat-bedienung__wahl">
+                <?php foreach (rfat_sprachen() as $code => $info) : ?>
+                    <a href="<?php echo esc_url(rfat_sprache_url($code)); ?>"
+                       lang="<?php echo esc_attr($info['html']); ?>"
+                       hreflang="<?php echo esc_attr($info['html']); ?>"
+                       data-rfat-sprache="<?php echo esc_attr($code); ?>"
+                       <?php echo $code === $rfat_sprache_jetzt ? 'aria-current="true"' : ''; ?>>
+                        <?php echo esc_html($info['eigen']); ?>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+        </fieldset>
+        </div>
+
         <nav class="rfat-nav-overlay__list"
              aria-label="<?php echo esc_attr(rfat_t('ui.hauptmenue', 'Hauptmenü')); ?>">
             <?php foreach ($items as $item) :
@@ -5820,42 +5926,8 @@ add_action('wp_footer', function () {
                 </a>
             <?php endforeach; ?>
         </nav>
-    </div>
 
-    <?php
-    /*
-     * Das Feld hinter dem Knopf. Drei Fragen, mehr nicht — jede weitere
-     * Einstellung waere eine, die niemand trifft.
-     *
-     * Die Sprachen sind Links und keine Schalter: Sie fuehren auf dieselbe
-     * Seite mit `?sprache=…`, funktionieren also auch ohne JavaScript, und
-     * lassen sich weitergeben. Ansicht und Schrift koennen das nicht — sie
-     * stehen nur im Browser und nirgends sonst.
-     */
-    ?>
-    <div class="rfat-bedienung" id="rfat-bedienung" hidden
-         role="dialog" aria-labelledby="rfat-bedienung-titel">
-        <h2 class="rfat-sr" id="rfat-bedienung-titel"><?php rfat_e('ui.bedienung', 'Sprache und Ansicht'); ?></h2>
-
-        <fieldset class="rfat-bedienung__gruppe">
-            <legend class="rfat-bedienung__titel"><?php rfat_e('ui.sprache', 'Sprache'); ?></legend>
-            <div class="rfat-bedienung__wahl">
-                <?php foreach (rfat_sprachen() as $code => $info) : ?>
-                    <a href="<?php echo esc_url(rfat_sprache_url($code)); ?>"
-                       lang="<?php echo esc_attr($info['html']); ?>"
-                       hreflang="<?php echo esc_attr($info['html']); ?>"
-                       data-rfat-sprache="<?php echo esc_attr($code); ?>"
-                       <?php echo $code === $rfat_sprache_jetzt ? 'aria-current="true"' : ''; ?>>
-                        <?php echo esc_html($info['eigen']); ?>
-                    </a>
-                <?php endforeach; ?>
-            </div>
-            <span class="rfat-bedienung__ab"><?php rfat_e(
-                'ui.uebersetzung_hinweis',
-                'Impressum und Datenschutz stehen nur auf Deutsch – sie sind rechtlich verbindlich.'
-            ); ?></span>
-        </fieldset>
-
+        <div class="rfat-bedienung rfat-bedienung--unten">
         <fieldset class="rfat-bedienung__gruppe">
             <legend class="rfat-bedienung__titel"><?php rfat_e('ui.ansicht', 'Ansicht'); ?></legend>
             <div class="rfat-bedienung__wahl">
@@ -5886,13 +5958,31 @@ add_action('wp_footer', function () {
             'ui.bedienung_hinweis',
             'Deine Wahl bleibt nur auf diesem Gerät – gespeichert im Browser, nicht bei uns.'
         ); ?></p>
+        <?php
+        /*
+         * Der Satz zu Impressum und Datenschutz stand bis eben oben bei den
+         * Sprachen. Dort kostete er zwei Zeilen und schob die Menuepunkte
+         * unter den Bildschirmrand — hier unten steht er bei dem anderen
+         * Kleingedruckten und tut dasselbe.
+         */
+        ?>
+        <p class="rfat-bedienung__hinweis"><?php rfat_e(
+            'ui.uebersetzung_hinweis',
+            'Impressum und Datenschutz stehen nur auf Deutsch – sie sind rechtlich verbindlich.'
+        ); ?></p>
+        </div>
     </div>
+
 
     <script id="rfat-bedienung">
     (function () {
-        var knopf = document.getElementById('rfat-bedienung-open');
-        var feld  = document.getElementById('rfat-bedienung');
-        if (!knopf || !feld) { return; }
+        /*
+         * Die Schalter sitzen im Menue-Overlay, das seine eigene
+         * Oeffnen-Logik samt Fokusfalle mitbringt. Hier bleibt deshalb nur
+         * noch, was gedrueckt wurde — kein Auf und Zu mehr.
+         */
+        var feld = document.getElementById('rfat-nav-overlay');
+        if (!feld) { return; }
 
         var A_SCHLUESSEL = <?php echo wp_json_encode(RFAT_ANSICHT_SCHLUESSEL); ?>;
         var S_SCHLUESSEL = <?php echo wp_json_encode(RFAT_SCHRIFT_SCHLUESSEL); ?>;
@@ -5926,42 +6016,6 @@ add_action('wp_footer', function () {
                 b.setAttribute('aria-pressed', b.getAttribute('data-rfat-schrift') === schrift ? 'true' : 'false');
             });
         }
-
-        function feldOeffnen() {
-            /*
-             * Beide Felder gleichzeitig offen waeren zwei Kaesten
-             * uebereinander an derselben Ecke. Das Menue hat seinen eigenen
-             * Schliessen-Knopf — den zu druecken ist sauberer, als seinen
-             * Zustand von hier aus anzufassen.
-             */
-            var navFeld = document.getElementById('rfat-nav-overlay');
-            var navZu = document.getElementById('rfat-nav-close');
-            if (navFeld && !navFeld.hidden && navZu) { navZu.click(); }
-
-            feld.hidden = false;
-            knopf.setAttribute('aria-expanded', 'true');
-            document.addEventListener('keydown', aufTaste);
-            document.addEventListener('click', aufKlickAussen, true);
-        }
-        function feldSchliessen(zurueckAufKnopf) {
-            feld.hidden = true;
-            knopf.setAttribute('aria-expanded', 'false');
-            document.removeEventListener('keydown', aufTaste);
-            document.removeEventListener('click', aufKlickAussen, true);
-            if (zurueckAufKnopf) { knopf.focus(); }
-        }
-        function aufTaste(e) {
-            if (e.key === 'Escape') { feldSchliessen(true); }
-        }
-        function aufKlickAussen(e) {
-            if (!feld.contains(e.target) && e.target !== knopf && !knopf.contains(e.target)) {
-                feldSchliessen(false);
-            }
-        }
-
-        knopf.addEventListener('click', function () {
-            if (feld.hidden) { feldOeffnen(); } else { feldSchliessen(true); }
-        });
 
         feld.addEventListener('click', function (e) {
             var ziel = e.target.closest ? e.target.closest('[data-rfat-ansicht],[data-rfat-schrift],[data-rfat-sprache]') : null;
@@ -8187,8 +8241,6 @@ function rfat_woerterbuch() {
         'tipp.text' => 'This page is also available in English.',
         'tipp.ja'   => 'Switch to English',
         'tipp.nein' => 'No, thanks',
-
-        'ui.bedienung'            => 'Language and display',
         'ui.sprache'              => 'Language',
         'ui.ansicht'              => 'Display',
         'ui.ansicht_auto'         => 'Automatic',
@@ -8353,8 +8405,6 @@ function rfat_woerterbuch() {
         'tipp.text' => 'Bu sayfa Türkçe olarak da mevcut.',
         'tipp.ja'   => 'Türkçeye geç',
         'tipp.nein' => 'Hayır, teşekkürler',
-
-        'ui.bedienung'            => 'Dil ve görünüm',
         'ui.sprache'              => 'Dil',
         'ui.ansicht'              => 'Görünüm',
         'ui.ansicht_auto'         => 'Otomatik',
@@ -8526,8 +8576,6 @@ function rfat_woerterbuch() {
         'tipp.text' => 'هذه الصفحة متاحة أيضًا بالعربية.',
         'tipp.ja'   => 'التحويل إلى العربية',
         'tipp.nein' => 'لا، شكرًا',
-
-        'ui.bedienung'            => 'اللغة والعرض',
         'ui.sprache'              => 'اللغة',
         'ui.ansicht'              => 'العرض',
         'ui.ansicht_auto'         => 'تلقائي',
@@ -8694,8 +8742,6 @@ function rfat_woerterbuch() {
         'tipp.text' => 'Ця сторінка доступна також українською.',
         'tipp.ja'   => 'Перейти на українську',
         'tipp.nein' => 'Ні, дякую',
-
-        'ui.bedienung'            => 'Мова та вигляд',
         'ui.sprache'              => 'Мова',
         'ui.ansicht'              => 'Вигляд',
         'ui.ansicht_auto'         => 'Автоматично',
