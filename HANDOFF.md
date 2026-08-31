@@ -739,6 +739,133 @@ die Karte darüber** —, Radius 16 px, Hover grün, Absage-Zeile rot.
 
 ---
 
+### 3.15 Mehrere Sprachen und Bedienung für alle (1.28.0)
+
+Zwei Sachen, die dieselbe Frage beantworten: **Wer kann diese Seite
+eigentlich benutzen?** Bis 1.27.1 war die Antwort: wer Deutsch liest, gut
+sieht und eine Maus in der Hand hat.
+
+#### Mehrsprachigkeit
+
+Fünf Fassungen: **Deutsch, Englisch, Türkisch, Arabisch, Ukrainisch.** Das
+sind, neben Deutsch, die Sprachen, die einem in Frankfurt in einer offenen
+Werkstatt am häufigsten begegnen.
+
+**Kein Übersetzungs-Plugin und kein Übersetzungsdienst.** Die Seite lädt
+nichts von fremden Servern — ein Dienst, der jeden Seitentext zum Übersetzen
+irgendwohin schickt, wäre genau das Gegenteil von dem, womit diese Seite
+wirbt. Die Texte des Plugins sind überschaubar, also stehen sie in der Datei:
+`rfat_woerterbuch()` ganz unten.
+
+**Deutsch steht nicht in der Tabelle.** Es steht als zweites Argument an
+jedem `rfat_t()`-Aufruf, also dort, wo der Text ausgegeben wird:
+
+```php
+rfat_e('abruf.kalender', 'Zum Kalender hinzufügen');
+```
+
+Zwei Gründe. Beim Lesen des Ablaufs sieht man weiter, was auf der Seite
+steht — nicht `abruf.kalender`. Und wenn ein Schlüssel im Wörterbuch fehlt,
+erscheint der deutsche Satz. Nie ein leeres Feld, nie ein nackter Schlüssel.
+
+**Wie die Sprache gewählt wird:** ausschließlich über `?sprache=en` in der
+Adresse. Der Browser-Kopf `Accept-Language` wird bewusst **nicht**
+ausgewertet — die Seite läuft hinter Cloudflare, und ein Cache, der HTML
+nach einem Kopffeld ausliefern soll, das er nicht mitcacht, gibt irgendwann
+die türkische Fassung an jemanden aus, der Deutsch angefragt hat. Eine
+Adresse pro Sprache kann das nicht passieren.
+
+Die Browsersprache wird trotzdem genutzt, aber **im Browser**: Passt sie zu
+einer der Fassungen, bietet eine schmale Leiste unten den Wechsel an — in
+dieser Sprache geschrieben, denn „Diese Seite gibt es auch auf Englisch"
+hilft niemandem, der kein Deutsch liest. Angeboten, nicht erzwungen: Viele
+stellen ihr Gerät auf Englisch und lesen trotzdem lieber die deutsche
+Fassung, weil dort die Ortsnamen stimmen.
+
+Die einmal gewählte Sprache merkt sich der Browser (localStorage) und trägt
+sie beim nächsten Besuch selbst nach.
+
+**Nicht übersetzt** — und das steht auch so im Bedienfeld:
+
+- **Impressum und Datenschutz.** Beide sind rechtlich verbindlich; eine
+  Übersetzung daneben wäre eine zweite Fassung, die im Zweifel etwas
+  anderes sagt.
+- **Der Verwaltungsbereich.** Den sieht nur das Team.
+- **Die Kategorienamen** („E-Bike-Service"). Sie kommen aus der Einstellung
+  und sind damit jederzeit änderbar — eine feste Tabelle liefe ihnen
+  hinterher.
+
+Beim Datum wird nur der Wochentag übersetzt, die Zahlen bleiben
+`06.09.2026`. Absicht: Wer die Sprache nicht liest, liest die Zahlen
+trotzdem — und Mail, Kalendereintrag und Aushang zeigen dieselbe
+Schreibweise. Eine je Sprache andere Datumsordnung (09/06 gegen 06.09.) wäre
+hier keine Hilfe, sondern eine Verwechslungsquelle.
+
+Arabisch dreht die Seite (`dir="rtl"` am `<html>`-Element). Auch das Komma
+im Datum steht im Wörterbuch — im Arabischen ist es ein anderes Zeichen (،).
+
+#### Bedienung: Ansicht, Kontrast, Schriftgröße
+
+Drei Einstellungen, jede mit einem Grund, der keine Geschmackssache ist:
+
+| | Wofür |
+|---|---|
+| **Dunkel** | Abends und bei Lichtempfindlichkeit (Migräne, nach einer Augen-OP) ist eine weiße Fläche schmerzhaft. Das Betriebssystem weiß längst, was eingestellt ist — bisher hat diese Seite nicht zugehört. |
+| **Hoher Kontrast** | Bei nachlassendem Sehvermögen reichen graue Hinweistexte auf hellgrünem Grund nicht. Diese Ansicht wirft alle Zwischentöne weg: Schwarz auf Weiß, harte Ränder, unterstrichene Links. |
+| **Schrift größer** | Der Browser-Zoom vergrößert alles, auch das Layout — dann muss man waagerecht scrollen. Wer nur größere Buchstaben braucht, will genau das nicht. |
+
+Umgesetzt über **Farb-Variablen**. Die Bauteile nennen keine Farbwerte mehr,
+sondern `var(--rfat-…)`; die Werte stehen an einer Stelle, in
+`rfat_ansicht_farben()`. Ein Zwischenstand hatte die dunklen Farben an jeder
+Regel doppelt — nach der dritten Änderung stimmten hell und dunkel nicht
+mehr überein.
+
+Zwei Fallen, die dabei aufgefallen sind:
+
+- **Weiß auf Grün geht im Dunkelmodus nicht.** Das helle Grün auf dunklem
+  Grund käme mit weißer Schrift auf ein Verhältnis von gut 2:1 — schlechter
+  lesbar als der Fließtext daneben. Dafür gibt es `--rfat-auf-gruen`: hell
+  ein Weiß, dunkel ein sehr dunkles Grün.
+- **Blöcke mit eigener Hintergrundfarbe** (`has-background`, der Verlauf
+  hinter dem Hero) behalten ihre helle Fläche und bekommen dunkle Schrift
+  zurück. Welche Farbe dort eingestellt ist, wissen wir nicht; sie
+  umzufärben hieße raten.
+
+`@media (prefers-contrast: more)` und `@media (prefers-color-scheme: dark)`
+greifen von selbst — wer das im Betriebssystem eingestellt hat, hat die
+Frage schon einmal beantwortet. Eine ausdrückliche Wahl auf der Seite sticht
+sie dann aus.
+
+Die Wahl steht **im Browser, nicht bei uns** (localStorage) und wird schon
+im `<head>` angewandt, bevor etwas gemalt wird — sonst blitzt erst eine
+weiße Seite auf, und genau das ist für lichtempfindliche Augen das, was weh
+tut. Der Datenschutz nennt das jetzt ausdrücklich (Abschnitt „Sprache und
+Ansicht", `RFAT_BEDIENUNG_ABSATZ`).
+
+#### Was sonst noch für die Bedienung getan wurde
+
+- **Sichtbarer Tastaturfokus überall.** Wer nicht zeigen kann — Tastatur,
+  Sprachsteuerung, Schaltertaster — hat nur den Fokusrahmen. An einer Stelle
+  hat dieses Plugin ihn selbst abgeschaltet (`outline: none` am Codefeld);
+  das ist weg. `:focus-visible` statt `:focus`, damit ein Mausklick keinen
+  Rahmen hinterlässt.
+- **Die Leiste steht jetzt am Anfang des Quelltextes.** Sie wird in
+  `wp_footer` ausgegeben — für die Tastatur hieß das: erst durch die ganze
+  Seite, dann zur Navigation. Ein `insertBefore` beim Laden bringt sie nach
+  vorn; sichtbar ändert sich nichts, sie schwebt ohnehin. Ein
+  „Zum Inhalt springen"-Link des Themes bleibt davor.
+- **`role="status"` / `role="alert"` an den Meldungskästen.** Das Markup
+  stand zwölfmal wörtlich im Ablauf, und drei davon hatten gar kein `role` —
+  ein Screenreader las die Antwort auf ein abgeschicktes Formular nicht vor.
+  Aus zwölf Abschriften sind `rfat_pub_gut()` und `rfat_pub_schlecht()`
+  geworden.
+- **`lang` und `dir`** am `<html>`-Element. Ohne `lang` liest ein
+  Screenreader die englische Fassung mit deutscher Aussprache vor.
+- **Sprachen zusätzlich als reine Links im Seitenfuß** — das Feld oben
+  braucht JavaScript zum Aufklappen, die Links funktionieren immer.
+
+---
+
 ---
 
 ## 4. Versionshistorie
@@ -791,6 +918,7 @@ die Karte darüber** —, Radius 16 px, Hover grün, Absage-Zeile rot.
 | 1.26.0 | **Produktionsreif:** Statuszeile nur noch für Angemeldete, feste Menü-Reihenfolge, Seiten aus dem Menü nehmbar, Platzhalter-Warnung (siehe 3.13) |
 | 1.27.0 | Die drei Termin-Aktionen als **runde Zeilen** in der Sprache der Karte darüber |
 | 1.27.1 | Mail-Fehler klarer gedeutet: Microsofts SMTP-Sperre, falsche Absenderadresse, dichtes Container-Netz |
+| 1.28.0 | **Fünf Sprachen** (de/en/tr/ar/uk) und **Bedienung für alle**: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Fokus (siehe 3.15) |
 
 ---
 
