@@ -1,8 +1,8 @@
 <?php
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
- * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern.
- * Version: 1.28.0
+ * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern. (4) Mehrsprachig (Deutsch, Englisch, Türkisch, Arabisch, Ukrainisch) und für alle bedienbar: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Tastaturfokus – die Wahl bleibt im Browser, nichts davon erreicht den Server.
+ * Version: 1.29.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -68,6 +68,265 @@ define('RFAT_CLEANUP_HOOK', 'rfat_cleanup_emails');
 define('RFAT_NOTIFIED_META', '_rfat_notified');
 define('RFAT_NOTIFY_OPTION', 'rfat_notify_to');
 define('RFAT_NOTIFY_DEFAULT', 'repair.ffm@outlook.com');
+
+/* =========================================================================
+ * MEHRSPRACHIGKEIT
+ *
+ * Die Seite steht in Frankfurt. Wer hier ein Handy repariert bekommen
+ * moechte, spricht nicht zwangslaeufig Deutsch — und ein Buchungsablauf,
+ * den man nicht lesen kann, ist fuer diese Leute keiner.
+ *
+ * Warum kein Uebersetzungs-Plugin: Die Seite haelt sich an
+ * Datensparsamkeit und laedt nichts von fremden Servern. Ein
+ * Uebersetzungsdienst waere genau das Gegenteil. Die Texte dieses
+ * Plugins sind ueberschaubar, also stehen sie hier — als Tabelle am
+ * Ende der Datei, unter WOERTERBUCH.
+ *
+ * Wie die Sprache gewaehlt wird:
+ *
+ *   1. `?sprache=en` in der Adresse. Das ist das einzige Signal, das der
+ *      Server auswertet.
+ *   2. Sonst Deutsch.
+ *
+ * Bewusst NICHT der Accept-Language-Kopf des Browsers: Die Seite laeuft
+ * hinter Cloudflare. Ein Cache, der HTML nach einem Kopffeld ausliefern
+ * soll, das er nicht mitcacht, gibt irgendwann die tuerkische Fassung an
+ * jemanden aus, der Deutsch angefragt hat. Eine Adresse pro Sprache kann
+ * das nicht passieren.
+ *
+ * Die Browsersprache wird trotzdem genutzt — aber im Browser: Passt sie
+ * zu einer der Fassungen, bietet eine schmale Leiste den Wechsel an
+ * (siehe BEDIENUNG unten). Angeboten, nicht erzwungen.
+ * ========================================================================= */
+define('RFAT_SPRACHE_PARAM', 'sprache');
+define('RFAT_SPRACHE_STANDARD', 'de');
+
+/**
+ * Die Fassungen, die es gibt.
+ *
+ * `eigen` ist der Name der Sprache in dieser Sprache — nicht der deutsche.
+ * Wer kein Deutsch liest, findet „Tuerkisch" in einer Liste nicht, „Tuerkce"
+ * dagegen sofort. Flaggen bewusst nicht: Sprachen sind keine Staaten,
+ * und Arabisch gehoert zu ueber zwanzig davon.
+ */
+function rfat_sprachen() {
+    return [
+        'de' => ['eigen' => 'Deutsch',    'deutsch' => 'Deutsch',    'dir' => 'ltr', 'html' => 'de-DE'],
+        'en' => ['eigen' => 'English',    'deutsch' => 'Englisch',   'dir' => 'ltr', 'html' => 'en-GB'],
+        'tr' => ['eigen' => 'Türkçe',     'deutsch' => 'Türkisch',   'dir' => 'ltr', 'html' => 'tr-TR'],
+        'ar' => ['eigen' => 'العربية',    'deutsch' => 'Arabisch',   'dir' => 'rtl', 'html' => 'ar'],
+        'uk' => ['eigen' => 'Українська', 'deutsch' => 'Ukrainisch', 'dir' => 'ltr', 'html' => 'uk-UA'],
+    ];
+}
+
+/**
+ * Die Sprache dieses Seitenaufrufs.
+ *
+ * Einmal ermittelt und gemerkt: Sie wird pro Aufruf ein paar Dutzend Mal
+ * gebraucht, und `$_GET` aendert sich zwischendurch nicht.
+ */
+function rfat_sprache() {
+    static $sprache = null;
+    if ($sprache !== null) {
+        return $sprache;
+    }
+    $sprache = RFAT_SPRACHE_STANDARD;
+    if (!empty($_GET[RFAT_SPRACHE_PARAM])) {
+        $wunsch = sanitize_key(wp_unslash($_GET[RFAT_SPRACHE_PARAM]));
+        if (isset(rfat_sprachen()[$wunsch])) {
+            $sprache = $wunsch;
+        }
+    }
+    return $sprache;
+}
+
+/** Angaben zur aktuellen (oder einer bestimmten) Sprache. */
+function rfat_sprache_info($code = '') {
+    $alle = rfat_sprachen();
+    $code = $code !== '' ? $code : rfat_sprache();
+    return isset($alle[$code]) ? $alle[$code] : $alle[RFAT_SPRACHE_STANDARD];
+}
+
+/** Wird von rechts nach links gelesen? */
+function rfat_ist_rtl() {
+    $info = rfat_sprache_info();
+    return $info['dir'] === 'rtl';
+}
+
+/**
+ * Ein Text in der aktuellen Sprache.
+ *
+ * Der deutsche Text steht als zweites Argument direkt an der Stelle, an
+ * der er ausgegeben wird — nicht in einer Tabelle. Das hat zwei Gruende:
+ * Beim Lesen des Ablaufs sieht man weiter, was dort steht, und eine
+ * fehlende Uebersetzung faellt auf Deutsch zurueck statt auf einen
+ * nackten Schluessel. Schlimmstenfalls steht ein Satz auf Deutsch da —
+ * nie „abruf.kalender".
+ */
+function rfat_t($schluessel, $deutsch) {
+    $sprache = rfat_sprache();
+    if ($sprache === RFAT_SPRACHE_STANDARD) {
+        return $deutsch;
+    }
+    $buch = rfat_woerterbuch();
+    return isset($buch[$sprache][$schluessel]) ? $buch[$sprache][$schluessel] : $deutsch;
+}
+
+/** Wie rfat_t(), aber gleich ausgeben und maskieren. */
+function rfat_e($schluessel, $deutsch) {
+    echo esc_html(rfat_t($schluessel, $deutsch));
+}
+
+/**
+ * Eine Liste (Wochentage) in der aktuellen Sprache.
+ *
+ * Eigene Funktion, weil rfat_t() einen String zurueckgibt und eine halb
+ * uebersetzte Liste schlimmer waere als eine deutsche: Faellt sie zurueck,
+ * dann ganz.
+ */
+function rfat_t_liste($schluessel, array $deutsch) {
+    $sprache = rfat_sprache();
+    if ($sprache === RFAT_SPRACHE_STANDARD) {
+        return $deutsch;
+    }
+    $buch = rfat_woerterbuch();
+    $wert = isset($buch[$sprache][$schluessel]) ? $buch[$sprache][$schluessel] : null;
+    return (is_array($wert) && count($wert) === count($deutsch)) ? $wert : $deutsch;
+}
+
+/**
+ * Dieselbe Adresse in einer anderen Sprache.
+ *
+ * Deutsch bekommt keinen Parameter: Es ist die Fassung, die ohne alles
+ * ausgeliefert wird, und eine Adresse ohne Ballast ist die, die man
+ * weitergibt.
+ */
+function rfat_sprache_url($code, $url = '') {
+    if ($url === '') {
+        $url = rfat_aktuelle_url();
+    }
+    $url = remove_query_arg(RFAT_SPRACHE_PARAM, $url);
+    return $code === RFAT_SPRACHE_STANDARD ? $url : add_query_arg(RFAT_SPRACHE_PARAM, $code, $url);
+}
+
+/**
+ * Eine eigene Adresse mit der aktuellen Sprache versehen.
+ *
+ * Ohne das fiele jeder Klick im Buchungsablauf auf Deutsch zurueck — der
+ * Ablauf hat drei Schritte, und der zweite waere schon wieder deutsch.
+ */
+function rfat_url_mit_sprache($url) {
+    $sprache = rfat_sprache();
+    return $sprache === RFAT_SPRACHE_STANDARD ? $url : add_query_arg(RFAT_SPRACHE_PARAM, $sprache, $url);
+}
+
+/**
+ * Die Adresse, die gerade abgerufen wird — samt Parametern.
+ *
+ * `get_permalink()` genuegt hier nicht: Auf /termin-buchen/?was=it soll
+ * der Sprachwechsel auf derselben Auswahl stehen bleiben und nicht auf
+ * Schritt 1 zurueckwerfen.
+ */
+function rfat_aktuelle_url() {
+    $pfad = isset($_SERVER['REQUEST_URI']) ? (string) wp_unslash($_SERVER['REQUEST_URI']) : '/';
+
+    /*
+     * Nur Schema und Host aus home_url(), den Rest aus der Anfrage.
+     * `home_url($pfad)` waere kuerzer, haengt aber ein Unterverzeichnis
+     * doppelt an, wenn WordPress in einem liegt (/blog/blog/seite/).
+     * Hier tut es das nicht — der Fall soll nur nicht auf jemanden warten,
+     * der die Seite einmal umzieht.
+     */
+    $teile  = wp_parse_url(home_url('/'));
+    $wurzel = (isset($teile['scheme']) ? $teile['scheme'] : 'https') . '://'
+            . (isset($teile['host']) ? $teile['host'] : '')
+            . (isset($teile['port']) ? ':' . $teile['port'] : '');
+
+    return $wurzel . $pfad;
+}
+
+/**
+ * lang- und dir-Attribut am <html>-Element.
+ *
+ * Beides ist keine Kosmetik: Ohne `lang` liest ein Screenreader die
+ * englische Fassung mit deutscher Aussprache vor, und ohne `dir="rtl"`
+ * steht die arabische Fassung linksbuendig mit der Satzzeichen an der
+ * falschen Seite — lesbar ist das nicht.
+ */
+add_filter('language_attributes', function ($ausgabe, $doctype = 'html') {
+    if (is_admin() || rfat_sprache() === RFAT_SPRACHE_STANDARD) {
+        return $ausgabe;
+    }
+    $info = rfat_sprache_info();
+    return 'lang="' . esc_attr($info['html']) . '" dir="' . esc_attr($info['dir']) . '"';
+}, 10, 2);
+
+/**
+ * Ein Datum in der aktuellen Sprache.
+ *
+ * Nur der Wochentag wird uebersetzt, die Zahlen bleiben `06.09.2026`.
+ * Absicht: Wer die Sprache der Seite nicht liest, liest die Zahlen
+ * trotzdem — und die Bestaetigungsmail, der Kalendereintrag und der
+ * Aushang an der Tuer zeigen dieselbe Schreibweise. Eine je Sprache
+ * andere Datumsordnung (09/06 gegen 06.09.) waere hier keine Hilfe,
+ * sondern eine Verwechslungsquelle.
+ */
+function rfat_wochentag_name($ts) {
+    $tage = rfat_t_liste('datum.wochentage', [
+        'Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag',
+    ]);
+    return $tage[(int) wp_date('w', $ts)];
+}
+
+/**
+ * „Samstag, 06.09.2026" in der aktuellen Sprache.
+ *
+ * Auch das Komma steht im Woerterbuch: Im Arabischen ist es ein anderes
+ * Zeichen (،). Ein lateinisches Komma mitten in einem arabischen Satz
+ * sieht aus wie ein Tippfehler — und bei rechtslaeufigem Text setzt der
+ * Browser es an die falsche Seite.
+ */
+function rfat_datum_lang($ts) {
+    return sprintf(
+        rfat_t('datum.format', '%1$s, %2$s'),
+        rfat_wochentag_name($ts),
+        wp_date('d.m.Y', $ts)
+    );
+}
+
+/** Dasselbe aus einem `Y-m-d`-Wert, wie ihn die Slots tragen. */
+function rfat_datum_aus_ymd($ymd) {
+    $ts = strtotime($ymd . ' 12:00:00');
+    return $ts ? rfat_datum_lang($ts) : (string) $ymd;
+}
+
+/** „14:00 Uhr" — im Englischen faellt das Wort weg, im Arabischen steht es voran. */
+function rfat_uhrzeit($zeit) {
+    return sprintf(rfat_t('datum.uhrzeit', '%s Uhr'), $zeit);
+}
+
+/**
+ * Menuepunkte tragen die Titel der WordPress-Seiten und sind damit
+ * deutsch. Fuer die Seiten, die dieses Plugin selbst anlegt, kennen wir
+ * den Slug — und koennen die Beschriftung mituebersetzen. Alles andere
+ * bleibt stehen, wie es im Seiten-Editor steht.
+ */
+function rfat_menue_label($url, $label) {
+    if (rfat_sprache() === RFAT_SPRACHE_STANDARD) {
+        return $label;
+    }
+    $slug = trim(rfat_url_pfad($url), '/');
+    $bekannt = [
+        ''                => ['menue.start',        'Startseite'],
+        'termin-buchen'   => ['menue.buchen',       'Termin buchen'],
+        'termin-abrufen'  => ['menue.abrufen',      'Termin abrufen'],
+        'termine-ort'     => ['menue.termine_ort',  'Termine & Ort'],
+        'mitmachen'       => ['menue.mitmachen',    'Mitmachen'],
+        'impressum'       => ['menue.impressum',    'Impressum'],
+        'datenschutz'     => ['menue.datenschutz',  'Datenschutz'],
+    ];
+    return isset($bekannt[$slug]) ? rfat_t($bekannt[$slug][0], $bekannt[$slug][1]) : $label;
+}
 
 // Internal WP core meta keys we never want to show/edit.
 /**
@@ -403,12 +662,12 @@ function rfat_humanize_key($key) {
      * vor dem Termin wirklich wissen will.
      */
     $bekannt = [
-        '_rc_note' => 'Problembeschreibung',
-        '_rc_cat'  => 'Bereich',
+        '_rc_note' => rfat_t('feld.note', 'Problembeschreibung'),
+        '_rc_cat'  => rfat_t('feld.cat',  'Bereich'),
         '_rc_slot' => 'Slot-Kennung',
-        '_rc_date' => 'Datum',
-        '_rc_time' => 'Uhrzeit',
-        '_rc_code' => 'Buchungscode',
+        '_rc_date' => rfat_t('feld.date', 'Datum'),
+        '_rc_time' => rfat_t('feld.time', 'Uhrzeit'),
+        '_rc_code' => rfat_t('feld.code', 'Buchungscode'),
     ];
     if (isset($bekannt[$key])) {
         return $bekannt[$key];
@@ -438,11 +697,11 @@ function rfat_get_status($post_id) {
 
 function rfat_status_label($status) {
     $labels = [
-        'angefragt'  => 'Angefragt',
-        'bestaetigt' => 'Bestätigt',
-        'offen'      => 'Offen',
-        'erledigt'   => 'Erledigt',
-        'storniert'  => 'Storniert',
+        'angefragt'  => rfat_t('status.angefragt',  'Angefragt'),
+        'bestaetigt' => rfat_t('status.bestaetigt', 'Bestätigt'),
+        'offen'      => rfat_t('status.offen',      'Offen'),
+        'erledigt'   => rfat_t('status.erledigt',   'Erledigt'),
+        'storniert'  => rfat_t('status.storniert',  'Storniert'),
     ];
     return isset($labels[$status]) ? $labels[$status] : ucfirst($status);
 }
@@ -1820,12 +2079,14 @@ function rfat_public_booking_details_html($post, $analysis) {
     <div class="rfat-pub-card">
         <div class="rfat-pub-card-top">
             <div>
-                <p class="rfat-pub-eyebrow">Dein Termin</p>
+                <p class="rfat-pub-eyebrow"><?php rfat_e('abruf.dein_termin', 'Dein Termin'); ?></p>
                 <p class="rfat-pub-when">
-                    <?php echo $ts ? esc_html(wp_date('l, d.m.Y', $ts)) : '<em>Termin unbekannt</em>'; ?>
+                    <?php echo $ts
+                        ? esc_html(rfat_datum_lang($ts))
+                        : '<em>' . esc_html(rfat_t('abruf.termin_unbekannt', 'Termin unbekannt')) . '</em>'; ?>
                 </p>
                 <?php if ($ts): ?>
-                    <p class="rfat-pub-time"><?php echo esc_html(wp_date('H:i', $ts)); ?> Uhr</p>
+                    <p class="rfat-pub-time"><?php echo esc_html(rfat_uhrzeit(wp_date('H:i', $ts))); ?></p>
                 <?php endif; ?>
             </div>
             <span class="rfat-pub-status" style="background:<?php echo esc_attr(rfat_status_color($status)); ?>;">
@@ -1842,7 +2103,7 @@ function rfat_public_booking_details_html($post, $analysis) {
                 // the prefix already stripped to reliably catch "Cat"/"Category".
                 $humanized = rfat_humanize_key($o['key']);
                 $is_category = (bool) preg_match('/^cat/i', $humanized);
-                $label = $is_category ? 'Kategorie' : $humanized;
+                $label = $is_category ? rfat_t('abruf.kategorie', 'Kategorie') : $humanized;
                 $value = $is_category ? rfat_friendly_category($o['value']) : $o['value'];
                 if ($value === '') {
                     continue;
@@ -1931,9 +2192,28 @@ add_action('init', function () {
     update_option('rfat_abrufseite', '1');
 }, 25);
 
+/**
+ * Die beiden Meldungskaesten der oeffentlichen Seite.
+ *
+ * Bisher stand das Markup zwoelfmal woertlich im Ablauf. Beim Uebersetzen
+ * fiel auf, dass drei davon `role` fehlte — ein Screenreader las die
+ * Antwort auf ein abgeschicktes Formular gar nicht vor. Aus zwoelf
+ * Abschriften ist deshalb eine Funktion geworden.
+ *
+ * `status` fuer Erfolg, `alert` fuer Fehler: `alert` unterbricht, was
+ * gerade vorgelesen wird. Bei „Gespeichert" waere das aufdringlich, bei
+ * „Es wurde nichts gespeichert" ist es genau richtig.
+ */
+function rfat_pub_gut($text) {
+    return '<div class="rfat-pub-notice rfat-pub-success" role="status">' . esc_html($text) . '</div>';
+}
+function rfat_pub_schlecht($text) {
+    return '<div class="rfat-pub-notice rfat-pub-error" role="alert">' . esc_html($text) . '</div>';
+}
+
 add_shortcode('rfat_manage_booking', function ($atts) {
     if (!post_type_exists('rc_booking')) {
-        return '<p>Die Terminverwaltung ist gerade nicht verfügbar.</p>';
+        return '<p>' . esc_html(rfat_t('abruf.nicht_verfuegbar', 'Die Terminverwaltung ist gerade nicht verfügbar.')) . '</p>';
     }
 
     $notice = '';
@@ -1945,8 +2225,9 @@ add_shortcode('rfat_manage_booking', function ($atts) {
      * man spaeter wieder an den Termin kommt.
      */
     if (!empty($_GET['neu'])) {
-        $notice = '<div class="rfat-pub-notice rfat-pub-success">'
-                . '<strong>Termin vorgemerkt.</strong> Wir sehen ihn uns an und melden uns.</div>';
+        $notice = '<div class="rfat-pub-notice rfat-pub-success" role="status">'
+                . '<strong>' . esc_html(rfat_t('abruf.vorgemerkt_kopf', 'Termin vorgemerkt.')) . '</strong> '
+                . esc_html(rfat_t('abruf.vorgemerkt_text', 'Wir sehen ihn uns an und melden uns.')) . '</div>';
     }
     $found = null;
     $code_value = '';
@@ -1969,14 +2250,14 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                     delete_post_meta($match['post']->ID, RFAT_EMAIL_KEEP_META);
                 }
                 wp_trash_post($match['post']->ID);
-                $notice = '<div class="rfat-pub-notice rfat-pub-success">Dein Termin wurde storniert. Der Slot ist jetzt wieder frei für andere.</div>';
+                $notice = rfat_pub_gut(rfat_t('abruf.storniert', 'Dein Termin wurde storniert. Der Slot ist jetzt wieder frei für andere.'));
                 $code_value = ''; // Clear so the lookup form shows fresh.
                 $found = null;
             } else {
-                $notice = '<div class="rfat-pub-notice rfat-pub-error">Dieser Code wurde nicht gefunden (eventuell schon storniert).</div>';
+                $notice = rfat_pub_schlecht(rfat_t('abruf.code_weg', 'Dieser Code wurde nicht gefunden (eventuell schon storniert).'));
             }
         } else {
-            $notice = '<div class="rfat-pub-notice rfat-pub-error">Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.</div>';
+            $notice = rfat_pub_schlecht(rfat_t('abruf.sicherheit', 'Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.'));
         }
     }
 
@@ -1988,21 +2269,24 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         if (wp_verify_nonce($_POST['_wpnonce'], 'rfat_pub_reschedule_' . rfat_normalize_code($old_code))) {
             $new_match = rfat_find_booking_by_code($new_code);
             if (!$new_match) {
-                $notice = '<div class="rfat-pub-notice rfat-pub-error">Der neue Code wurde nicht gefunden. Hast du den neuen Termin schon fertig gebucht?</div>';
+                $notice = rfat_pub_schlecht(rfat_t('abruf.neuer_code_weg', 'Der neue Code wurde nicht gefunden. Hast du den neuen Termin schon fertig gebucht?'));
                 $code_value = $old_code;
             } elseif (rfat_normalize_code($new_code) === rfat_normalize_code($old_code)) {
-                $notice = '<div class="rfat-pub-notice rfat-pub-error">Das ist noch dein alter Code. Bitte zuerst unten einen neuen Termin buchen.</div>';
+                $notice = rfat_pub_schlecht(rfat_t('abruf.alter_code', 'Das ist noch dein alter Code. Bitte zuerst unten einen neuen Termin buchen.'));
                 $code_value = $old_code;
             } else {
                 $old_match = rfat_find_booking_by_code($old_code);
                 if ($old_match) {
                     wp_trash_post($old_match['post']->ID);
                 }
-                $notice = '<div class="rfat-pub-notice rfat-pub-success">Erledigt! Dein alter Termin wurde storniert, dein neuer Termin (Code ' . esc_html(rfat_normalize_code($new_code)) . ') bleibt bestehen.</div>';
+                $notice = rfat_pub_gut(sprintf(
+                    rfat_t('abruf.verschoben', 'Erledigt! Dein alter Termin wurde storniert, dein neuer Termin (Code %s) bleibt bestehen.'),
+                    rfat_normalize_code($new_code)
+                ));
                 $code_value = '';
             }
         } else {
-            $notice = '<div class="rfat-pub-notice rfat-pub-error">Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.</div>';
+            $notice = rfat_pub_schlecht(rfat_t('abruf.sicherheit', 'Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.'));
         }
     }
 
@@ -2023,7 +2307,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         && !empty($_POST['rfat_pub_code']) && !empty($_POST['_wpnonce'])) {
         $ucode = sanitize_text_field(wp_unslash($_POST['rfat_pub_code']));
         if (!wp_verify_nonce($_POST['_wpnonce'], 'rfat_pub_unsub_' . rfat_normalize_code($ucode))) {
-            $notice = '<div class="rfat-pub-notice rfat-pub-error">Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.</div>';
+            $notice = rfat_pub_schlecht(rfat_t('abruf.sicherheit', 'Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.'));
         } else {
             $um = rfat_find_booking_by_code($ucode);
             if ($um) {
@@ -2043,7 +2327,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
              * Auch bei unbekanntem Code dieselbe Bestaetigung: Sonst
              * verrät die Seite, welche Codes existieren.
              */
-            $notice = '<div class="rfat-pub-notice rfat-pub-success">Erledigt. Zu diesem Code ist keine E-Mail-Adresse mehr gespeichert. Dein Termin bleibt unverändert bestehen.</div>';
+            $notice = rfat_pub_gut(rfat_t('abruf.abgemeldet', 'Erledigt. Zu diesem Code ist keine E-Mail-Adresse mehr gespeichert. Dein Termin bleibt unverändert bestehen.'));
             $unsub_code = '';
         }
     }
@@ -2053,11 +2337,11 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         && !empty($_POST['rfat_pub_code']) && !empty($_POST['_wpnonce'])) {
         $code_value = sanitize_text_field(wp_unslash($_POST['rfat_pub_code']));
         if (!wp_verify_nonce($_POST['_wpnonce'], 'rfat_pub_email_' . rfat_normalize_code($code_value))) {
-            $notice = '<div class="rfat-pub-notice rfat-pub-error">Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.</div>';
+            $notice = rfat_pub_schlecht(rfat_t('abruf.sicherheit', 'Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.'));
         } else {
             $match = rfat_find_booking_by_code($code_value);
             if (!$match) {
-                $notice = '<div class="rfat-pub-notice rfat-pub-error">Dieser Code wurde nicht gefunden.</div>';
+                $notice = rfat_pub_schlecht(rfat_t('abruf.code_unbekannt', 'Dieser Code wurde nicht gefunden.'));
             } else {
                 $pid   = $match['post']->ID;
                 $email = isset($_POST['rfat_pub_email'])
@@ -2076,16 +2360,16 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 $signal  = rfat_signal_pruefen($signal_roh);
                 $fehler  = [];
                 if ($email !== '' && !is_email($email)) {
-                    $fehler[] = 'Das sieht nicht nach einer gültigen E-Mail-Adresse aus.';
+                    $fehler[] = rfat_t('abruf.mail_ungueltig', 'Das sieht nicht nach einer gültigen E-Mail-Adresse aus.');
                 }
                 if ($signal['fehler'] !== '') {
                     $fehler[] = $signal['fehler'];
                 }
 
                 if ($fehler) {
-                    $notice = '<div class="rfat-pub-notice rfat-pub-error">'
-                        . implode('<br />', $fehler)
-                        . '<br /><strong>Es wurde nichts gespeichert.</strong></div>';
+                    $notice = '<div class="rfat-pub-notice rfat-pub-error" role="alert">'
+                        . implode('<br />', array_map('esc_html', $fehler))
+                        . '<br /><strong>' . esc_html(rfat_t('abruf.nichts_gespeichert', 'Es wurde nichts gespeichert.')) . '</strong></div>';
                 } else {
                     // Leeres Feld heißt: wieder löschen.
                     if ($email === '') {
@@ -2108,20 +2392,24 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                     }
 
                     if ($email === '' && $signal['wert'] === '') {
-                        $notice = '<div class="rfat-pub-notice rfat-pub-success">'
-                            . 'Zu deinem Termin ist jetzt kein Kontakt mehr gespeichert. '
-                            . 'Dein Termin bleibt bestehen.</div>';
+                        $notice = rfat_pub_gut(rfat_t(
+                            'abruf.kontakt_geloescht',
+                            'Zu deinem Termin ist jetzt kein Kontakt mehr gespeichert. Dein Termin bleibt bestehen.'
+                        ));
                     } else {
-                        $signal_wort = $signal['art'] === 'link' ? 'Signal-Link' : 'Signal-Benutzername';
+                        $signal_wort = $signal['art'] === 'link'
+                            ? rfat_t('abruf.signal_link', 'Signal-Link')
+                            : rfat_t('abruf.signal_name', 'Signal-Benutzername');
+                        $mail_wort = rfat_t('abruf.email_adresse', 'E-Mail-Adresse');
                         $was = ($email !== '' && $signal['wert'] !== '')
-                            ? 'E-Mail-Adresse und ' . $signal_wort
-                            : ($email !== '' ? 'E-Mail-Adresse' : $signal_wort);
-                        $notice = '<div class="rfat-pub-notice rfat-pub-success">Gespeichert: '
-                            . $was . '. '
+                            ? sprintf(rfat_t('abruf.und', '%1$s und %2$s'), $mail_wort, $signal_wort)
+                            : ($email !== '' ? $mail_wort : $signal_wort);
+                        $notice = rfat_pub_gut(
+                            sprintf(rfat_t('abruf.gespeichert', 'Gespeichert: %s.'), $was) . ' '
                             . ($keep
-                                ? 'Die Angaben bleiben gespeichert, bis du sie hier wieder löschst.'
-                                : 'Die Angaben werden nach dem Termin automatisch gelöscht.')
-                            . '</div>';
+                                ? rfat_t('abruf.bleibt_gespeichert', 'Die Angaben bleiben gespeichert, bis du sie hier wieder löschst.')
+                                : rfat_t('abruf.wird_geloescht', 'Die Angaben werden nach dem Termin automatisch gelöscht.'))
+                        );
                     }
                 }
             }
@@ -2144,24 +2432,22 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         && !empty($_POST['rfat_pub_code']) && !empty($_POST['_wpnonce'])) {
         $code_value = sanitize_text_field(wp_unslash($_POST['rfat_pub_code']));
         if (!wp_verify_nonce($_POST['_wpnonce'], 'rfat_pub_antwort_' . rfat_normalize_code($code_value))) {
-            $notice = '<div class="rfat-pub-notice rfat-pub-error">Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.</div>';
+            $notice = rfat_pub_schlecht(rfat_t('abruf.sicherheit', 'Sicherheitsprüfung fehlgeschlagen, bitte erneut versuchen.'));
         } else {
             $match = rfat_find_booking_by_code($code_value);
             $text  = isset($_POST['rfat_pub_antwort']) ? wp_unslash($_POST['rfat_pub_antwort']) : '';
             if (!$match) {
-                $notice = '<div class="rfat-pub-notice rfat-pub-error">Dieser Code wurde nicht gefunden.</div>';
+                $notice = rfat_pub_schlecht(rfat_t('abruf.code_unbekannt', 'Dieser Code wurde nicht gefunden.'));
             } elseif (trim((string) $text) === '') {
-                $notice = '<div class="rfat-pub-notice rfat-pub-error">Da stand noch nichts drin.</div>';
+                $notice = rfat_pub_schlecht(rfat_t('abruf.leer', 'Da stand noch nichts drin.'));
             } else {
                 // Vor dem Anhängen fragen — danach ist keine Frage mehr offen.
                 $war_frage = rfat_dialog_offene_frage($match['post']->ID) !== null;
                 if (rfat_dialog_anhaengen($match['post']->ID, 'gast', $text)) {
                     rfat_notify_antwort($match['post']->ID, $war_frage);
-                    $notice = '<div class="rfat-pub-notice rfat-pub-success">'
-                            . ($war_frage
-                                ? 'Danke! Deine Antwort ist bei uns.'
-                                : 'Notiert — wir haben es zu deinem Termin geschrieben.')
-                            . '</div>';
+                    $notice = rfat_pub_gut($war_frage
+                        ? rfat_t('abruf.danke_antwort', 'Danke! Deine Antwort ist bei uns.')
+                        : rfat_t('abruf.notiert', 'Notiert — wir haben es zu deinem Termin geschrieben.'));
                 }
             }
         }
@@ -2202,7 +2488,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
     if ($code_value !== '') {
         $found = rfat_find_booking_by_code($code_value);
         if (!$found && $notice === '') {
-            $notice = '<div class="rfat-pub-notice rfat-pub-error">Kein Termin mit diesem Code gefunden. Bitte prüfe die Schreibweise (z. B. RC-AB12C).</div>';
+            $notice = rfat_pub_schlecht(rfat_t('abruf.nicht_gefunden', 'Kein Termin mit diesem Code gefunden. Bitte prüfe die Schreibweise (z. B. RC-AB12C).'));
         }
     }
 
@@ -2213,27 +2499,28 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         <style>
             .rfat-pub-wrap { max-width: 560px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
             .rfat-pub-notice { padding: 14px 18px; border-radius: 14px; margin-bottom: 18px; font-weight: 600; }
-            .rfat-pub-success { background: #e8f1eb; color: #1f5a38; }
-            .rfat-pub-error { background: #fbeceb; color: #8a2c20; }
+            .rfat-pub-success { background: var(--rfat-gruen-flaeche); color: var(--rfat-gruen-text); }
+            .rfat-pub-error { background: var(--rfat-fehler-flaeche); color: var(--rfat-fehler-text); }
+            .rfat-pub-warnung { background: var(--rfat-warn-flaeche); color: var(--rfat-warn-text); }
 
             .rfat-pub-card {
-                background: #fff;
-                border: 1px solid #e7ebe8;
+                background: var(--rfat-flaeche);
+                border: 1px solid var(--rfat-rand);
                 border-radius: 20px;
                 padding: 22px 24px;
                 margin: 16px 0;
-                box-shadow: 0 6px 20px rgba(31, 47, 39, 0.06);
+                box-shadow: 0 6px 20px var(--rfat-schatten);
             }
             .rfat-pub-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-            .rfat-pub-eyebrow { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #6f7d74; }
-            .rfat-pub-when { font-weight: 800; font-size: 20px; margin: 0; color: #1c2a22; }
-            .rfat-pub-time { margin: 2px 0 0; font-size: 15px; color: #5b6b62; font-weight: 600; }
+            .rfat-pub-eyebrow { margin: 0 0 4px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--rfat-leise); }
+            .rfat-pub-when { font-weight: 800; font-size: 20px; margin: 0; color: var(--rfat-text); }
+            .rfat-pub-time { margin: 2px 0 0; font-size: 15px; color: var(--rfat-leise); font-weight: 600; }
             .rfat-pub-status { flex-shrink: 0; display: inline-block; padding: 5px 14px; border-radius: 999px; color: #fff; font-weight: 700; font-size: 12px; letter-spacing: .02em; }
 
-            .rfat-pub-fields { margin: 18px 0 0; padding-top: 16px; border-top: 1px solid #eef1ef; display: grid; gap: 10px; }
+            .rfat-pub-fields { margin: 18px 0 0; padding-top: 16px; border-top: 1px solid var(--rfat-rand); display: grid; gap: 10px; }
             .rfat-pub-field { display: flex; justify-content: space-between; gap: 16px; }
-            .rfat-pub-field dt { margin: 0; color: #5b6b62; font-size: 14px; }
-            .rfat-pub-field dd { margin: 0; font-weight: 600; color: #1c2a22; font-size: 14px; text-align: right; }
+            .rfat-pub-field dt { margin: 0; color: var(--rfat-leise); font-size: 14px; }
+            .rfat-pub-field dd { margin: 0; font-weight: 600; color: var(--rfat-text); font-size: 14px; text-align: right; }
 
             /*
              * Eine Reihe runder Zeilen, in derselben Sprache wie die Karte
@@ -2250,13 +2537,13 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 width: 100%;
                 box-sizing: border-box;
                 padding: 15px 18px;
-                background: #fff;
-                border: 1px solid #e7ebe8;
+                background: var(--rfat-flaeche);
+                border: 1px solid var(--rfat-rand);
                 border-radius: 16px;
                 /* Derselbe weiche Schatten wie die Karte darueber - sonst
                    sehen die Zeilen daneben flach aus statt dazugehoerig. */
-                box-shadow: 0 6px 20px rgba(31, 47, 39, 0.06);
-                color: #1c2a22;
+                box-shadow: 0 6px 20px var(--rfat-schatten);
+                color: var(--rfat-text);
                 font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                 font-size: 16px;
                 font-weight: 700;
@@ -2268,47 +2555,47 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             }
             .rfat-pub-zeile:hover,
             .rfat-pub-zeile:focus-visible {
-                background: #e8f1eb;
-                border-color: #2f7d4f;
-                color: #1f5a38;
+                background: var(--rfat-gruen-flaeche);
+                border-color: var(--rfat-gruen);
+                color: var(--rfat-gruen-text);
             }
             .rfat-pub-zeichen { width: 21px; height: 21px; flex-shrink: 0; }
             /*
              * Absagen wirft einen Termin weg. Es steht unten und traegt als
              * einziges eine andere Farbe — erkennbar, ohne zu schreien.
              */
-            .rfat-pub-zeile.is-absage { color: #b3402f; }
+            .rfat-pub-zeile.is-absage { color: var(--rfat-fehler); }
             .rfat-pub-zeile.is-absage:hover,
             .rfat-pub-zeile.is-absage:focus-visible {
-                background: #fdecec;
-                border-color: #b3402f;
-                color: #7a1010;
+                background: var(--rfat-fehler-flaeche);
+                border-color: var(--rfat-fehler);
+                color: var(--rfat-fehler-text);
             }
-            .rfat-pub-reschedule { border: 2px dashed #d7e0da; border-radius: 18px; padding: 20px; margin-top: 20px; background: #fbfcfb; }
+            .rfat-pub-reschedule { border: 2px dashed var(--rfat-rand-stark); border-radius: 18px; padding: 20px; margin-top: 20px; background: var(--rfat-flaeche-2); }
             .rfat-pub-reschedule ol { margin: 6px 0 0; padding-left: 20px; }
             .rfat-pub-reschedule li { margin-bottom: 4px; }
 
             .rfat-pub-mail {
                 margin: 18px 0;
                 padding: 16px 18px;
-                border: 1px solid #e7ebe8;
+                border: 1px solid var(--rfat-rand);
                 border-radius: 16px;
-                background: #fff;
+                background: var(--rfat-flaeche);
             }
-            .rfat-pub-mail-label { display: block; margin: 0; font-weight: 700; font-size: 15px; color: #1c2a22; }
+            .rfat-pub-mail-label { display: block; margin: 0; font-weight: 700; font-size: 15px; color: var(--rfat-text); }
             .rfat-pub-optional {
                 display: inline-block; margin-left: 6px; padding: 2px 9px;
-                border-radius: 999px; background: #e8f1eb; color: #1f5a38;
+                border-radius: 999px; background: var(--rfat-gruen-flaeche); color: var(--rfat-gruen-text);
                 font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
                 vertical-align: middle;
             }
-            .rfat-pub-mail-intro { margin: 8px 0 12px; font-size: 13px; color: #5b6b62; line-height: 1.5; }
+            .rfat-pub-mail-intro { margin: 8px 0 12px; font-size: 13px; color: var(--rfat-leise); line-height: 1.5; }
             .rfat-pub-mail-input { max-width: 100%; }
             /* Zwei Felder untereinander brauchen je eine eigene Beschriftung —
                ohne sie raet man beim zweiten Kasten, was hineingehoert. */
-            .rfat-pub-feld-label { display: block; font-weight: 600; font-size: 13px; color: #1c2a22; margin: 0 0 4px; }
+            .rfat-pub-feld-label { display: block; font-weight: 600; font-size: 13px; color: var(--rfat-text); margin: 0 0 4px; }
             .rfat-pub-mail-input + .rfat-pub-feld-label { margin-top: 12px; }
-            .rfat-pub-feldhinweis { margin: 6px 0 0; font-size: 12.5px; color: #5b6b62; line-height: 1.5; }
+            .rfat-pub-feldhinweis { margin: 6px 0 0; font-size: 12.5px; color: var(--rfat-leise); line-height: 1.5; }
 
             /* Beschriftung nur fuer Screenreader — das Theme bringt dafuer
                nichts mit, also hier. clip-path statt display:none: Verstecktes
@@ -2322,28 +2609,28 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                landet, weil wir etwas wissen wollen, soll die Frage sehen
                und nicht suchen. */
             .rfat-pub-frage {
-                background: #fbf2e2; border-left: 4px solid #c08a1e; border-radius: 12px;
+                background: var(--rfat-warn-flaeche); border-left: 4px solid var(--rfat-warn); border-radius: 12px;
                 padding: 16px 18px; margin: 0 0 18px;
             }
-            .rfat-pub-frage-text { margin: 4px 0 12px; font-size: 17px; line-height: 1.5; color: #1c2a22; }
+            .rfat-pub-frage-text { margin: 4px 0 12px; font-size: 17px; line-height: 1.5; color: var(--rfat-text); }
             .rfat-pub-frage textarea {
-                width: 100%; box-sizing: border-box; border: 1px solid #cfd8d2; border-radius: 10px;
+                width: 100%; box-sizing: border-box; border: 1px solid var(--rfat-rand-stark); border-radius: 10px;
                 padding: 10px; font: inherit; margin-bottom: 12px;
             }
             .rfat-pub-verlauf {
-                background: #f4f6f4; border-radius: 12px; padding: 14px 16px; margin: 0 0 18px;
+                background: var(--rfat-flaeche-2); border-radius: 12px; padding: 14px 16px; margin: 0 0 18px;
             }
-            .rfat-pub-verlauf-zeile { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: #3d4a43; }
-            .rfat-pub-verlauf-zeile.is-gast { color: #1f5a38; }
+            .rfat-pub-verlauf-zeile { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: var(--rfat-text); }
+            .rfat-pub-verlauf-zeile.is-gast { color: var(--rfat-gruen-text); }
 
             /* Zugeklappt eine Zeile, aufgeklappt ein Formular. */
             .rfat-pub-notiz { margin: 0 0 18px; }
             .rfat-pub-notiz > summary {
-                cursor: pointer; font-weight: 600; color: #1f5a38; padding: 6px 0;
+                cursor: pointer; font-weight: 600; color: var(--rfat-gruen-text); padding: 6px 0;
             }
-            .rfat-pub-notiz-hilfe { margin: 6px 0 10px; font-size: 13px; color: #5b6b62; line-height: 1.5; }
+            .rfat-pub-notiz-hilfe { margin: 6px 0 10px; font-size: 13px; color: var(--rfat-leise); line-height: 1.5; }
             .rfat-pub-notiz textarea {
-                width: 100%; box-sizing: border-box; border: 1px solid #cfd8d2; border-radius: 10px;
+                width: 100%; box-sizing: border-box; border: 1px solid var(--rfat-rand-stark); border-radius: 10px;
                 padding: 10px; font: inherit; margin-bottom: 12px;
             }
 
@@ -2351,7 +2638,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                Nebensache und darf nicht wie ein Hauptknopf wirken. */
             .rfat-pub-linkknopf {
                 background: none; border: 0; padding: 0; font: inherit; font-size: inherit;
-                color: #1f5a38; text-decoration: underline; cursor: pointer;
+                color: var(--rfat-gruen-text); text-decoration: underline; cursor: pointer;
             }
             #rfat-meine-termine { margin: 0 0 22px; }
             /* Auf `hidden` allein ist kein Verlass: Manche Themes setzen für
@@ -2360,51 +2647,57 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             .rfat-pub-share-hint[hidden], #rfat-meine-termine[hidden] { display: none; }
             .rfat-pub-keep {
                 display: flex; gap: 10px; align-items: flex-start;
-                margin: 12px 0; font-size: 13px; color: #1c2a22; line-height: 1.5;
+                margin: 12px 0; font-size: 13px; color: var(--rfat-text); line-height: 1.5;
                 cursor: pointer;
             }
             .rfat-pub-keep input { margin-top: 3px; flex-shrink: 0; width: 18px; height: 18px; }
-            .rfat-pub-keep em { display: block; color: #5b6b62; font-style: normal; }
+            .rfat-pub-keep em { display: block; color: var(--rfat-leise); font-style: normal; }
             .rfat-pub-mail-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-            .rfat-pub-mail-state { font-size: 12px; color: #5b6b62; line-height: 1.5; }
+            .rfat-pub-mail-state { font-size: 12px; color: var(--rfat-leise); line-height: 1.5; }
 
             .rfat-pub-share {
                 margin: 18px 0;
                 padding: 16px 18px;
-                background: #f4f8f5;
-                border: 1px solid #dbe6df;
+                background: var(--rfat-flaeche-3);
+                border: 1px solid var(--rfat-rand);
                 border-radius: 16px;
             }
-            .rfat-pub-share-label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 8px; color: #1c2a22; }
+            .rfat-pub-share-label { display: block; font-weight: 600; font-size: 14px; margin-bottom: 8px; color: var(--rfat-text); }
             .rfat-pub-share-row { display: flex; gap: 8px; flex-wrap: wrap; }
             .rfat-pub-share-url {
                 flex: 1 1 220px;
                 min-width: 0;
                 font-size: 15px;
                 padding: 11px 14px;
-                border: 1.5px solid #d7e0da;
+                border: 1.5px solid var(--rfat-rand-stark);
                 border-radius: 12px;
-                background: #fff;
-                color: #1c2a22;
+                background: var(--rfat-flaeche);
+                color: var(--rfat-text);
                 box-sizing: border-box;
             }
             .rfat-pub-copy { flex: 0 0 auto; }
-            .rfat-pub-copy.is-done { background: #1f5a38; }
-            .rfat-pub-share-hint { margin: 10px 0 0; font-size: 13px; color: #5b6b62; }
+            .rfat-pub-copy.is-done { background: var(--rfat-gruen-text); }
+            .rfat-pub-share-hint { margin: 10px 0 0; font-size: 13px; color: var(--rfat-leise); }
 
             .rfat-pub-code-input {
                 font-size: 16px;
                 padding: 12px 16px;
-                border: 1.5px solid #d7e0da;
+                border: 1.5px solid var(--rfat-rand-stark);
                 border-radius: 14px;
                 width: 100%;
                 max-width: 280px;
                 box-sizing: border-box;
                 transition: border-color .15s ease, box-shadow .15s ease;
             }
+            /*
+             * Hier stand `outline: none`. Der gruene Schein daneben ist
+             * huebsch, aber wer mit der Tastatur unterwegs ist, sieht auf
+             * einem hellen Feld kaum, dass der Cursor hier steht — und auf
+             * einem Bildschirm mit wenig Kontrast gar nicht. Der Rahmen des
+             * Browsers bleibt, der Schein kommt dazu.
+             */
             .rfat-pub-code-input:focus {
-                outline: none;
-                border-color: #2f7d4f;
+                border-color: var(--rfat-gruen);
                 box-shadow: 0 0 0 3px rgba(47, 125, 79, 0.15);
             }
         </style>
@@ -2427,21 +2720,23 @@ add_shortcode('rfat_manage_booking', function ($atts) {
 
         <?php if ($unsub_code !== ''): ?>
             <div class="rfat-pub-card">
-                <p class="rfat-pub-eyebrow">E-Mail-Benachrichtigung</p>
-                <p class="rfat-pub-when" style="font-size:18px;">Adresse zu <?php echo esc_html(rfat_normalize_code($unsub_code)); ?> löschen?</p>
-                <p style="color:#5b6b62;font-size:14px;margin:10px 0 0;">
-                    Wir entfernen dann die hinterlegte E-Mail-Adresse. Du bekommst
-                    keine Nachrichten mehr. <strong>Dein Termin bleibt bestehen</strong> -
-                    abgesagt wird dadurch nichts.
+                <p class="rfat-pub-eyebrow"><?php rfat_e('abruf.abmelden_kopf', 'E-Mail-Benachrichtigung'); ?></p>
+                <p class="rfat-pub-when" style="font-size:18px;"><?php echo esc_html(sprintf(
+                    rfat_t('abruf.abmelden_frage', 'Adresse zu %s löschen?'),
+                    rfat_normalize_code($unsub_code)
+                )); ?></p>
+                <p style="color:var(--rfat-leise);font-size:14px;margin:10px 0 0;">
+                    <?php rfat_e('abruf.abmelden_text', 'Wir entfernen dann die hinterlegte E-Mail-Adresse. Du bekommst keine Nachrichten mehr. Dein Termin bleibt bestehen – abgesagt wird dadurch nichts.'); ?>
                 </p>
                 <form method="post" style="margin-top:16px;">
                     <?php wp_nonce_field('rfat_pub_unsub_' . rfat_normalize_code($unsub_code)); ?>
                     <input type="hidden" name="rfat_pub_action" value="unsubscribe" />
                     <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($unsub_code); ?>" />
-                    <button type="submit" class="btn">Ja, Adresse löschen</button>
+                    <button type="submit" class="btn"><?php rfat_e('abruf.abmelden_ja', 'Ja, Adresse löschen'); ?></button>
                 </form>
                 <p style="margin:14px 0 0;font-size:13px;">
-                    <a href="<?php echo esc_url(add_query_arg('code', rfat_normalize_code($unsub_code), get_permalink())); ?>">Nein, zurück zu meinem Termin</a>
+                    <a href="<?php echo esc_url(rfat_url_mit_sprache(add_query_arg('code', rfat_normalize_code($unsub_code), get_permalink()))); ?>"><?php
+                        rfat_e('abruf.abmelden_nein', 'Nein, zurück zu meinem Termin'); ?></a>
                 </p>
             </div>
 
@@ -2462,10 +2757,11 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             <form method="post">
                 <input type="hidden" name="rfat_pub_action" value="lookup" />
                 <p>
-                    <label for="rfat_pub_code" style="display:block;font-weight:600;margin-bottom:6px;">Dein Buchungscode</label>
+                    <label for="rfat_pub_code" style="display:block;font-weight:600;margin-bottom:6px;"><?php
+                        rfat_e('abruf.dein_code', 'Dein Buchungscode'); ?></label>
                     <input class="rfat-pub-code-input" type="text" id="rfat_pub_code" name="rfat_pub_code" placeholder="RC-AB12C" value="<?php echo esc_attr($code_value); ?>" required />
                 </p>
-                <button type="submit" class="btn">Termin anzeigen</button>
+                <button type="submit" class="btn"><?php rfat_e('abruf.termin_anzeigen', 'Termin anzeigen'); ?></button>
             </form>
         <?php else:
             $post = $found['post'];
@@ -2485,26 +2781,30 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             ?>
             <?php if ($offene_frage): ?>
                 <div class="rfat-pub-frage">
-                    <p class="rfat-pub-eyebrow">Frage an dich</p>
+                    <p class="rfat-pub-eyebrow"><?php rfat_e('abruf.frage_an_dich', 'Frage an dich'); ?></p>
                     <p class="rfat-pub-frage-text"><?php echo nl2br(esc_html($offene_frage['text'])); ?></p>
                     <form method="post">
                         <?php wp_nonce_field('rfat_pub_antwort_' . $norm_code); ?>
                         <input type="hidden" name="rfat_pub_action" value="antwort" />
                         <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($norm_code); ?>" />
-                        <label class="rfat-sr" for="rfat-antwort-<?php echo esc_attr($post->ID); ?>">Deine Antwort</label>
+                        <label class="rfat-sr" for="rfat-antwort-<?php echo esc_attr($post->ID); ?>"><?php
+                            rfat_e('abruf.deine_antwort', 'Deine Antwort'); ?></label>
                         <textarea id="rfat-antwort-<?php echo esc_attr($post->ID); ?>" name="rfat_pub_antwort"
-                                  rows="3" maxlength="1000" placeholder="Deine Antwort"></textarea>
-                        <button type="submit" class="btn">Antwort senden</button>
+                                  rows="3" maxlength="1000"
+                                  placeholder="<?php echo esc_attr(rfat_t('abruf.deine_antwort', 'Deine Antwort')); ?>"></textarea>
+                        <button type="submit" class="btn"><?php rfat_e('abruf.antwort_senden', 'Antwort senden'); ?></button>
                     </form>
                 </div>
             <?php endif; ?>
 
             <?php if ($verlauf && !$offene_frage): ?>
                 <div class="rfat-pub-verlauf">
-                    <p class="rfat-pub-eyebrow">Bisher besprochen</p>
+                    <p class="rfat-pub-eyebrow"><?php rfat_e('abruf.bisher', 'Bisher besprochen'); ?></p>
                     <?php foreach ($verlauf as $eintrag): ?>
                         <p class="rfat-pub-verlauf-zeile <?php echo $eintrag['von'] === 'gast' ? 'is-gast' : ''; ?>">
-                            <strong><?php echo $eintrag['von'] === 'gast' ? 'Du' : 'Wir'; ?>:</strong>
+                            <strong><?php echo esc_html($eintrag['von'] === 'gast'
+                                ? rfat_t('abruf.du', 'Du')
+                                : rfat_t('abruf.wir', 'Wir')); ?>:</strong>
                             <?php echo nl2br(esc_html($eintrag['text'])); ?>
                         </p>
                     <?php endforeach; ?>
@@ -2530,30 +2830,43 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                  */
                 ?>
                 <details class="rfat-pub-notiz">
-                    <summary>Etwas nachtragen?</summary>
+                    <summary><?php rfat_e('abruf.nachtragen', 'Etwas nachtragen?'); ?></summary>
                     <p class="rfat-pub-notiz-hilfe">
-                        Zum Beispiel, was genau kaputt ist oder was du mitbringst.
-                        Wir sehen es vor deinem Termin.
+                        <?php rfat_e('abruf.nachtragen_hilfe', 'Zum Beispiel, was genau kaputt ist oder was du mitbringst. Wir sehen es vor deinem Termin.'); ?>
                     </p>
                     <form method="post">
                         <?php wp_nonce_field('rfat_pub_antwort_' . $norm_code); ?>
                         <input type="hidden" name="rfat_pub_action" value="antwort" />
                         <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($norm_code); ?>" />
-                        <label class="rfat-sr" for="rfat-notiz-<?php echo esc_attr($post->ID); ?>">Deine Notiz</label>
+                        <label class="rfat-sr" for="rfat-notiz-<?php echo esc_attr($post->ID); ?>"><?php
+                            rfat_e('abruf.deine_notiz', 'Deine Notiz'); ?></label>
                         <textarea id="rfat-notiz-<?php echo esc_attr($post->ID); ?>" name="rfat_pub_antwort"
-                                  rows="3" maxlength="1000" placeholder="Deine Notiz"></textarea>
-                        <button type="submit" class="btn">Absenden</button>
+                                  rows="3" maxlength="1000"
+                                  placeholder="<?php echo esc_attr(rfat_t('abruf.deine_notiz', 'Deine Notiz')); ?>"></textarea>
+                        <button type="submit" class="btn"><?php rfat_e('abruf.absenden', 'Absenden'); ?></button>
                     </form>
                 </details>
             <?php endif; ?>
 
             <?php
             // Direktlink auf genau diesen Termin — zum Speichern statt Abtippen.
-            $share_url = add_query_arg('code', $norm_code, get_permalink());
+            $share_url = rfat_url_mit_sprache(add_query_arg('code', $norm_code, get_permalink()));
             ?>
             <div class="rfat-pub-share" data-rfat-code="<?php echo esc_attr($norm_code); ?>">
                 <label class="rfat-pub-share-label" for="rfat-share-<?php echo esc_attr($post->ID); ?>">
-                    Dein Code <strong><?php echo esc_html($norm_code); ?></strong> — hier ist er als Link:
+                    <?php
+                    /*
+                     * Der Code steht in <strong> mitten im Satz. In einer
+                     * anderen Sprache steht er an anderer Stelle, also
+                     * bekommt der Satz einen Platzhalter statt zwei
+                     * Halbsaetze — sonst laesst er sich nicht uebersetzen,
+                     * ohne die Wortstellung zu zerreissen.
+                     */
+                    printf(
+                        esc_html(rfat_t('abruf.link_label', 'Dein Code %s — hier ist er als Link:')),
+                        '<strong>' . esc_html($norm_code) . '</strong>'
+                    );
+                    ?>
                 </label>
                 <div class="rfat-pub-share-row">
                     <input class="rfat-pub-share-url" type="text" readonly
@@ -2561,7 +2874,8 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                            value="<?php echo esc_url($share_url); ?>"
                            onfocus="this.select();" />
                     <button type="button" class="btn rfat-pub-copy"
-                            data-target="rfat-share-<?php echo esc_attr($post->ID); ?>">Kopieren</button>
+                            data-target="rfat-share-<?php echo esc_attr($post->ID); ?>"><?php
+                        rfat_e('abruf.kopieren', 'Kopieren'); ?></button>
                 </div>
                 <?php
                 /*
@@ -2575,8 +2889,9 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             </div>
 
             <?php if (rfat_get_status($post->ID) === 'angefragt'): ?>
-                <div class="rfat-pub-notice" style="background:#fbf2e2;color:#7a5510;">
-                    <strong>Noch nicht bestätigt.</strong> Wir sehen uns deine Anfrage an und melden uns.
+                <div class="rfat-pub-notice rfat-pub-warnung">
+                    <strong><?php rfat_e('abruf.offen_kopf', 'Noch nicht bestätigt.'); ?></strong>
+                    <?php rfat_e('abruf.offen_text', 'Wir sehen uns deine Anfrage an und melden uns.'); ?>
                 </div>
             <?php endif; ?>
 
@@ -2600,57 +2915,65 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                  */
                 ?>
                 <p class="rfat-pub-mail-label">
-                    Wie wir dich erreichen <span class="rfat-pub-optional">freiwillig</span>
+                    <?php rfat_e('abruf.kontakt_kopf', 'Wie wir dich erreichen'); ?>
+                    <span class="rfat-pub-optional"><?php rfat_e('buchen.freiwillig', 'freiwillig'); ?></span>
                 </p>
                 <p class="rfat-pub-mail-intro">
-                    Freiwillig – ohne Angabe ändert sich nichts. Damit melden wir uns,
-                    wenn es etwas zu klären gibt oder dein Termin bestätigt ist.
+                    <?php rfat_e('abruf.kontakt_intro', 'Freiwillig – ohne Angabe ändert sich nichts. Damit melden wir uns, wenn es etwas zu klären gibt oder dein Termin bestätigt ist.'); ?>
                 </p>
 
-                <label class="rfat-pub-feld-label" for="rfat-mail-<?php echo esc_attr($post->ID); ?>">E-Mail</label>
+                <label class="rfat-pub-feld-label" for="rfat-mail-<?php echo esc_attr($post->ID); ?>"><?php
+                    rfat_e('abruf.email', 'E-Mail'); ?></label>
                 <input class="rfat-pub-code-input rfat-pub-mail-input" type="email"
                        id="rfat-mail-<?php echo esc_attr($post->ID); ?>"
                        name="rfat_pub_email" placeholder="dein@beispiel.de"
                        value="<?php echo esc_attr($cur_email); ?>" />
 
-                <label class="rfat-pub-feld-label" for="rfat-signal-<?php echo esc_attr($post->ID); ?>">Signal-Link oder Benutzername</label>
+                <label class="rfat-pub-feld-label" for="rfat-signal-<?php echo esc_attr($post->ID); ?>"><?php
+                    rfat_e('abruf.signal_feld', 'Signal-Link oder Benutzername'); ?></label>
                 <input class="rfat-pub-code-input rfat-pub-mail-input" type="text"
                        id="rfat-signal-<?php echo esc_attr($post->ID); ?>"
                        name="rfat_pub_signal" placeholder="https://signal.me/#eu/… oder maxmuster.42"
                        autocapitalize="none" autocorrect="off" spellcheck="false"
                        value="<?php echo esc_attr($cur_signal); ?>" />
                 <p class="rfat-pub-feldhinweis">
-                    Am besten der <strong>Signal-Link</strong> (in Signal:
-                    <em>Einstellungen &rarr; Profil &rarr; Benutzername &rarr; Link kopieren</em>).
-                    Der Benutzername geht auch. Deine <strong>Telefonnummer brauchen wir nicht</strong>.
+                    <?php rfat_e(
+                        'abruf.signal_hinweis',
+                        'Am besten der Signal-Link (in Signal: Einstellungen → Profil → Benutzername → Link kopieren). '
+                        . 'Der Benutzername geht auch. Deine Telefonnummer brauchen wir nicht.'
+                    ); ?>
                 </p>
 
                 <label class="rfat-pub-keep">
                     <input type="checkbox" name="rfat_pub_email_keep" value="1"
                            <?php checked($cur_keep); ?> />
                     <span>
-                        Auch <strong>nach dem Termin</strong> gespeichert lassen.
-                        <em>Ohne Haken werden die Angaben danach gelöscht.</em>
+                        <?php rfat_e('abruf.keep', 'Auch nach dem Termin gespeichert lassen.'); ?>
+                        <em><?php rfat_e('abruf.keep_zusatz', 'Ohne Haken werden die Angaben danach gelöscht.'); ?></em>
                     </span>
                 </label>
 
                 <div class="rfat-pub-mail-actions">
-                    <button type="submit" class="btn"><?php echo $hat_kontakt ? 'Änderung speichern' : 'Kontakt speichern'; ?></button>
+                    <button type="submit" class="btn"><?php echo esc_html($hat_kontakt
+                        ? rfat_t('abruf.aendern_speichern', 'Änderung speichern')
+                        : rfat_t('abruf.kontakt_speichern', 'Kontakt speichern')); ?></button>
                     <?php if ($hat_kontakt): ?>
                         <span class="rfat-pub-mail-state">
-                            Gespeichert:
+                            <?php rfat_e('abruf.gespeichert_kopf', 'Gespeichert:'); ?>
                             <?php if ($cur_email !== ''): ?><strong><?php echo esc_html($cur_email); ?></strong><?php endif; ?>
-                            <?php if ($cur_email !== '' && $cur_signal !== ''): ?>und<?php endif; ?>
+                            <?php if ($cur_email !== '' && $cur_signal !== ''): ?><?php rfat_e('abruf.und_wort', 'und'); ?><?php endif; ?>
                             <?php if ($cur_signal !== ''): ?><strong>Signal: <?php
                                 // Der Link ist 70 Zeichen lang und sagt nichts — sein
                                 // Vorhandensein ist die ganze Auskunft, die hier zaehlt.
-                                echo rfat_signal_ist_link($cur_signal) ? 'dein Link' : esc_html($cur_signal);
+                                echo rfat_signal_ist_link($cur_signal)
+                                    ? esc_html(rfat_t('abruf.dein_link', 'dein Link'))
+                                    : esc_html($cur_signal);
                             ?></strong><?php endif; ?>
                             —
-                            <?php echo $cur_keep
-                                ? 'bleibt gespeichert, bis du es löschst'
-                                : 'wird nach dem Termin gelöscht'; ?>.
-                            Zum Löschen einfach das jeweilige Feld leeren und speichern.
+                            <?php echo esc_html($cur_keep
+                                ? rfat_t('abruf.bleibt_bis', 'bleibt gespeichert, bis du es löschst')
+                                : rfat_t('abruf.nach_termin_weg', 'wird nach dem Termin gelöscht')); ?>.
+                            <?php rfat_e('abruf.loeschen_hinweis', 'Zum Löschen einfach das jeweilige Feld leeren und speichern.'); ?>
                         </span>
                     <?php endif; ?>
                 </div>
@@ -2677,12 +3000,12 @@ add_shortcode('rfat_manage_booking', function ($atts) {
             ?>
             <div class="rfat-pub-liste">
                 <?php if ($analysis['datetime']): ?>
-                    <a class="rfat-pub-zeile" href="<?php echo esc_url(add_query_arg('ics', $norm_code, get_permalink())); ?>">
+                    <a class="rfat-pub-zeile" href="<?php echo esc_url(rfat_url_mit_sprache(add_query_arg('ics', $norm_code, get_permalink()))); ?>">
                         <svg class="rfat-pub-zeichen" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                             <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                   d="M7 3v3M17 3v3M4 9h16M5 6h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1z" />
                         </svg>
-                        <span>Zum Kalender hinzufügen</span>
+                        <span><?php rfat_e('abruf.kalender', 'Zum Kalender hinzufügen'); ?></span>
                     </a>
                 <?php endif; ?>
 
@@ -2692,10 +3015,10 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                         <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
                               d="M4 9h11a4 4 0 0 1 0 8h-2M4 9l3-3M4 9l3 3" />
                     </svg>
-                    <span>Termin verschieben</span>
+                    <span><?php rfat_e('abruf.verschieben', 'Termin verschieben'); ?></span>
                 </button>
 
-                <form method="post" onsubmit="return confirm('Diesen Termin wirklich stornieren?');">
+                <form method="post" onsubmit="return confirm('<?php echo esc_js(rfat_t('abruf.stornieren_frage', 'Diesen Termin wirklich stornieren?')); ?>');">
                     <?php wp_nonce_field('rfat_pub_cancel_' . $norm_code); ?>
                     <input type="hidden" name="rfat_pub_action" value="cancel" />
                     <input type="hidden" name="rfat_pub_code" value="<?php echo esc_attr($norm_code); ?>" />
@@ -2704,16 +3027,19 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                             <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
                                   d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM9 9l6 6M15 9l-6 6" />
                         </svg>
-                        <span>Termin stornieren</span>
+                        <span><?php rfat_e('abruf.stornieren', 'Termin stornieren'); ?></span>
                     </button>
                 </form>
             </div>
 
             <div id="rfat-reschedule-<?php echo esc_attr($post->ID); ?>" class="rfat-pub-reschedule" style="display:none;">
-                <p><strong>So verschiebst du deinen Termin:</strong></p>
+                <p><strong><?php rfat_e('abruf.verschieben_kopf', 'So verschiebst du deinen Termin:'); ?></strong></p>
                 <ol>
-                    <li>Buche unten einen neuen Termin über die normale Buchung – du bekommst einen neuen Code.</li>
-                    <li>Trage den neuen Code danach hier ein. Wir stornieren dann automatisch deinen alten Termin (<?php echo esc_html($norm_code); ?>).</li>
+                    <li><?php rfat_e('abruf.verschieben_1', 'Buche unten einen neuen Termin über die normale Buchung – du bekommst einen neuen Code.'); ?></li>
+                    <li><?php echo esc_html(sprintf(
+                        rfat_t('abruf.verschieben_2', 'Trage den neuen Code danach hier ein. Wir stornieren dann automatisch deinen alten Termin (%s).'),
+                        $norm_code
+                    )); ?></li>
                 </ol>
 
                 <div style="margin: 16px 0;">
@@ -2725,10 +3051,11 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                     <input type="hidden" name="rfat_pub_action" value="finish_reschedule" />
                     <input type="hidden" name="rfat_old_code" value="<?php echo esc_attr($norm_code); ?>" />
                     <p>
-                        <label for="rfat_new_code" style="display:block;font-weight:600;margin-bottom:6px;">Dein neuer Buchungscode</label>
+                        <label for="rfat_new_code" style="display:block;font-weight:600;margin-bottom:6px;"><?php
+                            rfat_e('abruf.neuer_code', 'Dein neuer Buchungscode'); ?></label>
                         <input class="rfat-pub-code-input" type="text" id="rfat_new_code" name="rfat_new_code" placeholder="RC-XY99Z" required />
                     </p>
-                    <button type="submit" class="btn">Alten Termin jetzt stornieren</button>
+                    <button type="submit" class="btn"><?php rfat_e('abruf.alten_stornieren', 'Alten Termin jetzt stornieren'); ?></button>
                 </form>
             </div>
         <?php endif; ?>
@@ -2749,6 +3076,23 @@ add_shortcode('rfat_manage_booking', function ($atts) {
         (function () {
             var SCHLUESSEL = 'rfat_codes';
             var MAX = 5;
+            /*
+             * Die Saetze kommen aus PHP, nicht aus dem Skript: Sonst waere
+             * dies die eine Stelle der Seite, die immer deutsch bleibt —
+             * und ausgerechnet sie erklaert, wie man wieder an seinen
+             * Termin kommt.
+             */
+            var TEXTE = <?php echo wp_json_encode([
+                'gemerkt'   => rfat_t('abruf.gemerkt', 'Dieses Gerät merkt sich den Termin — beim nächsten Besuch steht er hier oben. '),
+                'nicht'     => rfat_t('abruf.nicht_merken', 'nicht merken'),
+                'vergessen' => rfat_t('abruf.vergessen', 'Gut, dieses Gerät merkt sich nichts mehr. Bewahre deinen Code auf.'),
+                'meine'     => rfat_t('abruf.meine_termine', 'Deine Termine auf diesem Gerät'),
+                'mein'      => rfat_t('abruf.mein_termin', 'Dein Termin auf diesem Gerät'),
+                'anzeigen'  => rfat_t('abruf.code_anzeigen', '%s anzeigen'),
+                'anderer'   => rfat_t('abruf.anderer_code', 'Oder gib unten einen anderen Code ein. '),
+                'loeschen'  => rfat_t('abruf.gemerkte_loeschen', 'gemerkte Termine löschen'),
+            ]); ?>;
+            var SPRACHE = <?php echo wp_json_encode(rfat_sprache() === RFAT_SPRACHE_STANDARD ? '' : rfat_sprache()); ?>;
 
             function lesen() {
                 try {
@@ -2783,14 +3127,14 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 var code = karte.getAttribute('data-rfat-code');
                 var hinweis = karte.querySelector('.rfat-pub-share-hint');
                 if (code && merken(code) && hinweis) {
-                    hinweis.textContent = 'Dieses Gerät merkt sich den Termin — beim nächsten Besuch steht er hier oben. ';
+                    hinweis.textContent = TEXTE.gemerkt;
                     var weg = document.createElement('button');
                     weg.type = 'button';
                     weg.className = 'rfat-pub-linkknopf';
-                    weg.textContent = 'nicht merken';
+                    weg.textContent = TEXTE.nicht;
                     weg.addEventListener('click', function () {
                         vergessen();
-                        hinweis.textContent = 'Gut, dieses Gerät merkt sich nichts mehr. Bewahre deinen Code auf.';
+                        hinweis.textContent = TEXTE.vergessen;
                     });
                     hinweis.appendChild(weg);
                     hinweis.hidden = false;
@@ -2804,25 +3148,26 @@ add_shortcode('rfat_manage_booking', function ($atts) {
                 if (gemerkt.length) {
                     var titel = document.createElement('p');
                     titel.className = 'rfat-pub-eyebrow';
-                    titel.textContent = gemerkt.length > 1 ? 'Deine Termine auf diesem Gerät' : 'Dein Termin auf diesem Gerät';
+                    titel.textContent = gemerkt.length > 1 ? TEXTE.meine : TEXTE.mein;
                     kasten.appendChild(titel);
 
                     gemerkt.forEach(function (c) {
                         var a = document.createElement('a');
                         a.className = 'btn';
                         a.style.marginRight = '8px';
-                        a.href = '?code=' + encodeURIComponent(c);
-                        a.textContent = c + ' anzeigen';
+                        a.href = '?code=' + encodeURIComponent(c)
+                               + (SPRACHE ? '&<?php echo esc_js(RFAT_SPRACHE_PARAM); ?>=' + encodeURIComponent(SPRACHE) : '');
+                        a.textContent = TEXTE.anzeigen.replace('%s', c);
                         kasten.appendChild(a);
                     });
 
                     var oder = document.createElement('p');
                     oder.className = 'rfat-pub-share-hint';
-                    oder.textContent = 'Oder gib unten einen anderen Code ein. ';
+                    oder.textContent = TEXTE.anderer;
                     var weg2 = document.createElement('button');
                     weg2.type = 'button';
                     weg2.className = 'rfat-pub-linkknopf';
-                    weg2.textContent = 'gemerkte Termine löschen';
+                    weg2.textContent = TEXTE.loeschen;
                     weg2.addEventListener('click', function () {
                         vergessen();
                         kasten.hidden = true;
@@ -2845,7 +3190,7 @@ add_shortcode('rfat_manage_booking', function ($atts) {
 
                     function done() {
                         var before = btn.textContent;
-                        btn.textContent = 'Kopiert ✓';
+                        btn.textContent = <?php echo wp_json_encode(rfat_t('abruf.kopiert', 'Kopiert ✓')); ?>;
                         btn.classList.add('is-done');
                         window.setTimeout(function () {
                             btn.textContent = before;
@@ -2900,8 +3245,8 @@ add_action('wp_head', function () {
             align-items: center;
             justify-content: center;
             gap: 8px;
-            background: #2f7d4f;
-            color: #fff;
+            background: var(--rfat-gruen);
+            color: var(--rfat-auf-gruen);
             border: 0;
             border-radius: clamp(9px, 2vw, 11px);
             padding: clamp(10px, 2.5vw, 14px) clamp(16px, 5vw, 26px);
@@ -2916,18 +3261,18 @@ add_action('wp_head', function () {
         }
         .btn:hover,
         .btn:focus-visible {
-            background: #256a42;
+            background: var(--rfat-gruen-tief);
         }
         .btn.ghost {
             background: transparent;
-            color: #2f7d4f;
-            border: 2px solid #2f7d4f;
+            color: var(--rfat-gruen);
+            border: 2px solid var(--rfat-gruen);
             padding: clamp(8px, 2.2vw, 12px) clamp(14px, 4.5vw, 24px);
         }
         .btn.ghost:hover,
         .btn.ghost:focus-visible {
-            background: #e8f1eb;
-            color: #1f5a38;
+            background: var(--rfat-gruen-flaeche);
+            color: var(--rfat-gruen-text);
         }
 
         /*
@@ -3008,7 +3353,7 @@ add_action('wp_head', function () {
             padding: 0;
             border: 0;
             border-radius: 19px;
-            background: #2f7d4f;
+            background: var(--rfat-gruen);
             cursor: pointer;
             box-shadow: 0 4px 16px rgba(31, 90, 56, .30);
             transition: width .2s ease, height .2s ease, border-radius .2s ease,
@@ -3017,7 +3362,7 @@ add_action('wp_head', function () {
         }
         .rfat-nav-open:active { transform: scale(.93); }
         .rfat-nav-open:focus-visible {
-            outline: 3px solid #1f5a38;
+            outline: 3px solid var(--rfat-gruen-text);
             outline-offset: 3px;
         }
         .rfat-topbar.is-small .rfat-nav-open {
@@ -3046,7 +3391,7 @@ add_action('wp_head', function () {
             height: 2.5px;
             width: 100%;
             border-radius: 2px;
-            background: #fff;
+            background: var(--rfat-auf-gruen);
             transition: transform .26s cubic-bezier(.2, .7, .3, 1),
                         opacity .16s ease, width .2s ease;
         }
@@ -3104,7 +3449,7 @@ add_action('wp_head', function () {
             z-index: 99999;
             display: flex;
             flex-direction: column;
-            background: #f7f8f6;
+            background: var(--rfat-flaeche-2);
             /* Lange Menüs müssen scrollbar bleiben, sonst sind untere
                Punkte auf kleinen Displays nicht erreichbar. */
             overflow-y: auto;
@@ -3130,10 +3475,10 @@ add_action('wp_head', function () {
             width: 48px;
             height: 48px;
             padding: 0;
-            border: 1px solid #cfd8d2;
+            border: 1px solid var(--rfat-rand-stark);
             border-radius: 12px;
-            background: #fff;
-            color: #1c2a22;
+            background: var(--rfat-flaeche);
+            color: var(--rfat-text);
             cursor: pointer;
         }
         .rfat-nav-overlay__list {
@@ -3147,10 +3492,10 @@ add_action('wp_head', function () {
             box-sizing: border-box;
             width: 100%;
             padding: 15px 18px;
-            border: 1px solid #e7ebe8;
+            border: 1px solid var(--rfat-rand);
             border-radius: 14px;
-            background: #fff;
-            color: #1c2a22;
+            background: var(--rfat-flaeche);
+            color: var(--rfat-text);
             font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             font-size: 19px;
             font-weight: 700;
@@ -3158,22 +3503,22 @@ add_action('wp_head', function () {
         }
         .rfat-nav-link:hover,
         .rfat-nav-link:focus-visible {
-            background: #e8f1eb;
-            border-color: #2f7d4f;
-            color: #1f5a38;
+            background: var(--rfat-gruen-flaeche);
+            border-color: var(--rfat-gruen);
+            color: var(--rfat-gruen-text);
         }
         .rfat-nav-link.is-active {
-            border-color: #2f7d4f;
-            background: #e8f1eb;
-            color: #1f5a38;
+            border-color: var(--rfat-gruen);
+            background: var(--rfat-gruen-flaeche);
+            color: var(--rfat-gruen-text);
         }
         /* "Termin buchen" bleibt auch im Menü der grüne Haupt-Button */
         .rfat-nav-link.is-primary,
         .rfat-nav-link.is-primary:hover,
         .rfat-nav-link.is-primary:focus-visible {
-            background: #2f7d4f;
-            border-color: #2f7d4f;
-            color: #fff;
+            background: var(--rfat-gruen);
+            border-color: var(--rfat-gruen);
+            color: var(--rfat-auf-gruen);
         }
         /* Seite hinter dem offenen Menü nicht mitscrollen lassen */
         .rfat-nav-locked body {
@@ -3220,7 +3565,7 @@ add_action('wp_head', function () {
                 box-sizing: border-box;
                 gap: 4px;
                 padding: 10px;
-                background: #fff;
+                background: var(--rfat-flaeche);
                 border-radius: 20px;
                 box-shadow: 0 18px 44px rgba(20, 40, 30, .20),
                             0 2px 8px rgba(20, 40, 30, .10);
@@ -3262,16 +3607,16 @@ add_action('wp_head', function () {
             .rfat-nav-overlay__list .rfat-nav-link:hover,
             .rfat-nav-overlay__list .rfat-nav-link:focus-visible,
             .rfat-nav-overlay__list .rfat-nav-link.is-active {
-                background: #e8f1eb;
+                background: var(--rfat-gruen-flaeche);
                 border-color: transparent;
-                color: #1f5a38;
+                color: var(--rfat-gruen-text);
             }
             .rfat-nav-overlay__list .rfat-nav-link.is-primary,
             .rfat-nav-overlay__list .rfat-nav-link.is-primary:hover,
             .rfat-nav-overlay__list .rfat-nav-link.is-primary:focus-visible {
-                background: #2f7d4f;
-                border-color: #2f7d4f;
-                color: #fff;
+                background: var(--rfat-gruen);
+                border-color: var(--rfat-gruen);
+                color: var(--rfat-auf-gruen);
             }
             /* Ein schwebendes Feld ist kein Grund, die Seite festzuhalten -
                und der verschwindende Rollbalken verschoebe das Layout. */
@@ -3390,21 +3735,21 @@ add_action('wp_head', function () {
             font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             font-size: 12px;
             line-height: 1.4;
-            color: #7d8b81;
+            color: var(--rfat-leise);
             flex-wrap: wrap;
         }
         .rfat-status-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: #2f7d4f;
+            background: var(--rfat-gruen);
             flex-shrink: 0;
             /* Ein schwacher Hof macht den Punkt auf kleinen Displays
                erkennbar, ohne dass er sich in den Vordergrund draengt. */
             box-shadow: 0 0 0 3px rgba(47, 125, 79, .16);
         }
         .rfat-status-dot.is-warn {
-            background: #c08a1e;
+            background: var(--rfat-warn);
             box-shadow: 0 0 0 3px rgba(192, 138, 30, .18);
         }
         .rfat-status-sep { opacity: .5; }
@@ -3422,6 +3767,635 @@ add_action('wp_head', function () {
     <?php echo rfat_minify_style_tags(ob_get_clean()); ?>
     <?php
 }, 999);
+
+/* =========================================================================
+ * BEDIENUNG: ANSICHT, KONTRAST, SCHRIFTGROESSE
+ *
+ * „Fuer alle Menschen" heisst hier drei konkrete Sachen, und keine davon
+ * ist Geschmackssache:
+ *
+ *   Dunkel      — abends und bei Lichtempfindlichkeit (Migraene, nach einer
+ *                 Augen-OP) ist eine weisse Flaeche schmerzhaft. Das
+ *                 Betriebssystem weiss laengst, was jemand eingestellt hat;
+ *                 bisher hat diese Seite nicht zugehoert.
+ *   Kontrast    — bei nachlassendem Sehvermoegen reichen graue Hinweistexte
+ *                 auf hellgruenem Grund nicht. Diese Ansicht wirft alle
+ *                 Zwischentoene weg: Schwarz auf Weiss, harte Raender.
+ *   Schrift     — der Browser-Zoom vergroessert alles, auch das Layout.
+ *                 Wer nur groessere Buchstaben braucht, will nicht durch
+ *                 eine breitere Seite scrollen.
+ *
+ * Umgesetzt ueber Farb-Variablen. Die Bauteile weiter oben nennen keine
+ * Farbwerte mehr, sondern `var(--rfat-…)`; hier stehen die Werte. Ein
+ * Zwischenstand hatte die dunklen Farben an jeder Regel doppelt stehen —
+ * nach der dritten Aenderung stimmten hell und dunkel nicht mehr ueberein.
+ * Eine Stelle, drei Ansichten.
+ *
+ * Gespeichert wird die Wahl im Browser (localStorage), nicht bei uns:
+ * kein Cookie, kein Konto, nichts, was den Server erreicht. Der Datenschutz
+ * nennt das ausdruecklich — siehe RFAT_COOKIE_ABSATZ.
+ * ========================================================================= */
+define('RFAT_ANSICHT_SCHLUESSEL', 'rfat_ansicht');
+define('RFAT_SCHRIFT_SCHLUESSEL', 'rfat_schrift');
+define('RFAT_SPRACHE_SCHLUESSEL', 'rfat_sprache');
+
+/**
+ * Die Farbwerte einer Ansicht.
+ *
+ * Als Funktion und nicht als drei CSS-Bloecke: Der dunkle Satz wird an
+ * zwei Stellen gebraucht (einmal fuer „das System steht auf dunkel",
+ * einmal fuer „hier ausdruecklich gewaehlt"), und zwei Abschriften
+ * derselben Palette laufen auseinander.
+ */
+function rfat_ansicht_farben($ansicht) {
+    if ($ansicht === 'dunkel') {
+        return '
+            color-scheme: dark;
+            --rfat-grund: #111714;
+            --rfat-flaeche: #1a2320;
+            --rfat-flaeche-2: #212b27;
+            --rfat-flaeche-3: #1d2723;
+            --rfat-text: #e9f0ec;
+            --rfat-leise: #a9b6ae;
+            --rfat-leiser: #7f8d85;
+            --rfat-rand: #2f3b36;
+            --rfat-rand-stark: #45534d;
+            /*
+             * Helles Gruen auf dunklem Grund — und deshalb DUNKLE Schrift
+             * darauf. Weiss auf diesem Gruen kaeme auf ein Verhaeltnis von
+             * gut 2:1 und waere damit weniger lesbar als der Fliesstext
+             * daneben. Genau dafuer gibt es --rfat-auf-gruen.
+             */
+            --rfat-gruen: #5cbd85;
+            --rfat-gruen-tief: #7ad19c;
+            --rfat-gruen-text: #8fd8ac;
+            --rfat-gruen-flaeche: #1e3327;
+            --rfat-gruen-flaeche-2: #27462f;
+            --rfat-auf-gruen: #0d1a13;
+            --rfat-warn: #e2ab3f;
+            --rfat-warn-flaeche: #392e15;
+            --rfat-warn-text: #f2d79b;
+            --rfat-fehler: #ea7d68;
+            --rfat-fehler-flaeche: #3a1f1a;
+            --rfat-fehler-text: #f7bcb0;
+            --rfat-schatten: rgba(0, 0, 0, .45);
+            --rfat-fokus: #ffffff;
+        ';
+    }
+
+    if ($ansicht === 'kontrast') {
+        return '
+            color-scheme: light;
+            --rfat-grund: #ffffff;
+            --rfat-flaeche: #ffffff;
+            --rfat-flaeche-2: #ffffff;
+            --rfat-flaeche-3: #ffffff;
+            --rfat-text: #000000;
+            --rfat-leise: #000000;
+            --rfat-leiser: #000000;
+            --rfat-rand: #000000;
+            --rfat-rand-stark: #000000;
+            --rfat-gruen: #00532a;
+            --rfat-gruen-tief: #003a1d;
+            --rfat-gruen-text: #00401f;
+            --rfat-gruen-flaeche: #ffffff;
+            --rfat-gruen-flaeche-2: #ffffff;
+            --rfat-auf-gruen: #ffffff;
+            --rfat-warn: #5c3d00;
+            --rfat-warn-flaeche: #ffffff;
+            --rfat-warn-text: #3d2900;
+            --rfat-fehler: #9b0000;
+            --rfat-fehler-flaeche: #ffffff;
+            --rfat-fehler-text: #7a0000;
+            --rfat-schatten: transparent;
+            --rfat-fokus: #000000;
+        ';
+    }
+
+    // Hell: die Farben, mit denen die Seite immer schon lief.
+    return '
+        color-scheme: light;
+        --rfat-grund: #ffffff;
+        --rfat-flaeche: #ffffff;
+        --rfat-flaeche-2: #f4f6f4;
+        --rfat-flaeche-3: #f4f8f5;
+        --rfat-text: #1c2a22;
+        --rfat-leise: #5b6b62;
+        --rfat-leiser: #9aa8a0;
+        --rfat-rand: #e7ebe8;
+        --rfat-rand-stark: #cfd8d2;
+        --rfat-gruen: #2f7d4f;
+        --rfat-gruen-tief: #256a42;
+        --rfat-gruen-text: #1f5a38;
+        --rfat-gruen-flaeche: #e8f1eb;
+        --rfat-gruen-flaeche-2: #cde0d4;
+        --rfat-auf-gruen: #ffffff;
+        --rfat-warn: #c08a1e;
+        --rfat-warn-flaeche: #fbf2e2;
+        --rfat-warn-text: #7a5510;
+        --rfat-fehler: #b3402f;
+        --rfat-fehler-flaeche: #fdecec;
+        --rfat-fehler-text: #7a1010;
+        --rfat-schatten: rgba(31, 47, 39, .06);
+        --rfat-fokus: #10241a;
+    ';
+}
+
+/**
+ * Die Flaeche der Seite selbst — nicht nur die Bauteile dieses Plugins.
+ *
+ * Das Theme kennen wir nicht. Was wir kennen, sind die Klassen, die
+ * WordPress an Bloecke haengt: Ein Block, dem im Editor eine eigene
+ * Hintergrundfarbe gegeben wurde (`has-background`, `wp-block-cover` —
+ * hier der Verlauf hinter dem Hero), behaelt diese Flaeche. Sie
+ * umzufaerben hiesse raten; darum bekommt sie ihre dunkle Schrift zurueck,
+ * damit dort nichts Helles auf Hellem steht.
+ */
+function rfat_ansicht_seite_css($wurzel) {
+    return "
+        {$wurzel} body {
+            background-color: var(--rfat-grund);
+            color: var(--rfat-text);
+        }
+        {$wurzel} h1, {$wurzel} h2, {$wurzel} h3,
+        {$wurzel} h4, {$wurzel} h5, {$wurzel} h6 {
+            color: var(--rfat-text);
+        }
+        {$wurzel} a:not(.btn):not(.rfat-nav-link):not(.rfat-pub-zeile):not(.rc-cat):not(.rc-slot):not(.rc-btn) {
+            color: var(--rfat-gruen-text);
+        }
+        {$wurzel} hr, {$wurzel} table, {$wurzel} th, {$wurzel} td {
+            border-color: var(--rfat-rand);
+        }
+        {$wurzel} input, {$wurzel} textarea, {$wurzel} select {
+            background-color: var(--rfat-flaeche);
+            color: var(--rfat-text);
+            border-color: var(--rfat-rand-stark);
+        }
+        {$wurzel} ::placeholder { color: var(--rfat-leiser); opacity: 1; }
+        {$wurzel} code, {$wurzel} pre {
+            background-color: var(--rfat-flaeche-2);
+            color: var(--rfat-text);
+        }
+        /* Bloecke mit eigener Hintergrundfarbe: siehe Kommentar oben. */
+        {$wurzel} .has-background:not(.has-text-color),
+        {$wurzel} .wp-block-cover:not(.has-text-color) { color: #1c2a22; }
+        {$wurzel} .has-background a:not(.btn):not(.wp-block-button__link),
+        {$wurzel} .wp-block-cover a:not(.btn):not(.wp-block-button__link) { color: #1f5a38; }
+    ";
+}
+
+/**
+ * Was „hoher Kontrast" ausser den Farben noch bedeutet.
+ *
+ * Eigene Funktion aus demselben Grund wie die Palette daneben: Diese
+ * Regeln gelten zweimal — wenn jemand die Ansicht hier waehlt, und wenn
+ * im Betriebssystem „mehr Kontrast" steht. Zwei Abschriften waeren zwei
+ * Stellen zum Vergessen.
+ */
+function rfat_kontrast_regeln($wurzel) {
+    return "
+        /*
+         * Hoher Kontrast heisst auch: sichtbare Kanten. Ein 1-Pixel-Rand
+         * in Hellgrau ist auf einem verwaschenen Bildschirm kein Rand.
+         */
+        {$wurzel} .rfat-pub-card,
+        {$wurzel} .rfat-pub-zeile,
+        {$wurzel} .rfat-pub-mail,
+        {$wurzel} .rfat-pub-share,
+        {$wurzel} .rfat-nav-link,
+        {$wurzel} .rfat-bedienung,
+        {$wurzel} .rc-cat,
+        {$wurzel} .rc-slot,
+        {$wurzel} .rfat-pub-code-input {
+            border: 2px solid var(--rfat-rand);
+            box-shadow: none;
+        }
+        {$wurzel} .rfat-pub-notice,
+        {$wurzel} .rfat-pub-frage,
+        {$wurzel} .rc-error {
+            border: 2px solid currentColor;
+        }
+        /* Links nur an der Farbe zu erkennen, reicht bei Farbsehschwaeche nicht. */
+        {$wurzel} a { text-decoration: underline; }
+        {$wurzel} .btn,
+        {$wurzel} .rfat-nav-link,
+        {$wurzel} .rfat-pub-zeile { text-decoration: none; }
+    ";
+}
+
+add_action('wp_head', function () {
+    if (is_admin()) {
+        return;
+    }
+
+    $hell     = rfat_ansicht_farben('hell');
+    $dunkel   = rfat_ansicht_farben('dunkel');
+    $kontrast = rfat_ansicht_farben('kontrast');
+
+    /*
+     * „Nicht ausdruecklich anders gewaehlt" — das ist der Fall, in dem die
+     * Einstellung des Betriebssystems gilt. Steht am Wurzelelement
+     * data-rfat-ansicht="hell", hat jemand hier auf der Seite Hell gewaehlt,
+     * und die Systemeinstellung hat nichts mehr zu sagen.
+     */
+    $frei = ':root:not([data-rfat-ansicht="hell"]):not([data-rfat-ansicht="dunkel"]):not([data-rfat-ansicht="kontrast"])';
+
+    ob_start();
+    ?>
+    <style id="rfat-bedienung-css">
+        :root { <?php echo $hell; ?> }
+
+        /*
+         * Beschriftung nur fuer Screenreader. Stand bisher nur im CSS des
+         * Kurzbefehls — also nur auf „Termin abrufen". Die Ueberschrift des
+         * Bedienfelds steht auf jeder Seite und braucht sie ebenfalls.
+         * `clip-path` statt `display: none`: Verstecktes liest kein
+         * Screenreader vor.
+         */
+        .rfat-sr {
+            position: absolute; width: 1px; height: 1px; overflow: hidden;
+            clip-path: inset(50%); white-space: nowrap;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            <?php echo $frei; ?> { <?php echo $dunkel; ?> }
+            <?php echo rfat_ansicht_seite_css($frei); ?>
+        }
+        /*
+         * Wer im Betriebssystem „mehr Kontrast" eingestellt hat, hat die
+         * Frage schon einmal beantwortet. Sie hier ein zweites Mal zu
+         * stellen waere unhoeflich.
+         */
+        @media (prefers-contrast: more) {
+            <?php echo $frei; ?> { <?php echo $kontrast; ?> }
+            <?php echo rfat_kontrast_regeln($frei); ?>
+        }
+
+        :root[data-rfat-ansicht="hell"] { <?php echo $hell; ?> }
+        :root[data-rfat-ansicht="dunkel"] { <?php echo $dunkel; ?> }
+        <?php echo rfat_ansicht_seite_css(':root[data-rfat-ansicht="dunkel"]'); ?>
+        :root[data-rfat-ansicht="kontrast"] { <?php echo $kontrast; ?> }
+
+        <?php echo rfat_kontrast_regeln(':root[data-rfat-ansicht="kontrast"]'); ?>
+
+        /* ============ Sichtbarer Fokus ============
+         *
+         * Der wichtigste Punkt dieses ganzen Abschnitts. Wer nicht mit der
+         * Maus zeigen kann — Tastatur, Sprachsteuerung, Schaltertaster —
+         * hat nur den Fokusrahmen, um zu wissen, wo er ist. Das Theme setzt
+         * ihn stellenweise ab, und an einer Stelle tat es dieses Plugin
+         * selbst (`outline: none` am Codefeld, seit dieser Fassung weg).
+         *
+         * `:focus-visible` statt `:focus`: Ein Mausklick auf einen Knopf
+         * soll keinen Rahmen hinterlassen, ein Tabulatorsprung schon. Das
+         * entscheidet der Browser, und er entscheidet es besser als wir.
+         */
+        a:focus-visible,
+        button:focus-visible,
+        input:focus-visible,
+        select:focus-visible,
+        textarea:focus-visible,
+        summary:focus-visible,
+        [tabindex]:focus-visible {
+            outline: 3px solid var(--rfat-fokus);
+            outline-offset: 2px;
+        }
+        /* Auf gruenem Grund braucht der Rahmen einen hellen Saum, sonst
+           verschwindet er im Knopf. */
+        .btn:focus-visible,
+        .rfat-nav-link.is-primary:focus-visible,
+        .rfat-nav-open:focus-visible,
+        .rc-btn:focus-visible {
+            outline: 3px solid var(--rfat-fokus);
+            outline-offset: 2px;
+            box-shadow: 0 0 0 5px var(--rfat-grund);
+        }
+
+        /* ============ Schriftgroesse ============
+         *
+         * Zwei Wege, weil es zwei Sorten Text auf dieser Seite gibt.
+         *
+         * Der Fliesstext des Themes rechnet in `rem` — den erwischt die
+         * Prozentangabe am Wurzelelement. Die Bauteile dieses Plugins
+         * rechnen in Pixeln (bewusst: eine Trefferflaeche von 44 Pixeln ist
+         * eine Fingerkuppe, egal wie gross die Schrift steht). Die haengen
+         * deshalb an `--rfat-skala` und werden hier einzeln nachgezogen.
+         *
+         * Warum nicht einfach Browser-Zoom empfehlen: Der vergroessert die
+         * ganze Seite mitsamt Layout, und dann muss man waagerecht scrollen.
+         * Wer nur groessere Buchstaben braucht, will genau das nicht.
+         */
+        :root { --rfat-skala: 1; }
+        :root[data-rfat-schrift="gross"] { font-size: 112.5%; --rfat-skala: 1.125; }
+        :root[data-rfat-schrift="sehr-gross"] { font-size: 125%; --rfat-skala: 1.25; }
+
+        :root[data-rfat-schrift] .btn { font-size: calc(clamp(14px, 3.8vw, 17px) * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-pub-when { font-size: calc(20px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-pub-time { font-size: calc(15px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-pub-field dt,
+        :root[data-rfat-schrift] .rfat-pub-field dd,
+        :root[data-rfat-schrift] .rfat-pub-verlauf-zeile,
+        :root[data-rfat-schrift] .rfat-pub-share-label { font-size: calc(14px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-pub-zeile { font-size: calc(16px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-pub-frage-text { font-size: calc(17px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-pub-mail-label { font-size: calc(15px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-pub-mail-intro,
+        :root[data-rfat-schrift] .rfat-pub-feld-label,
+        :root[data-rfat-schrift] .rfat-pub-keep,
+        :root[data-rfat-schrift] .rfat-pub-share-hint,
+        :root[data-rfat-schrift] .rfat-pub-notiz-hilfe { font-size: calc(13px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-pub-feldhinweis,
+        :root[data-rfat-schrift] .rfat-pub-mail-state,
+        :root[data-rfat-schrift] .rfat-pub-eyebrow { font-size: calc(12.5px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-pub-code-input,
+        :root[data-rfat-schrift] .rfat-pub-share-url,
+        :root[data-rfat-schrift] .rfat-pub-frage textarea,
+        :root[data-rfat-schrift] .rfat-pub-notiz textarea { font-size: calc(16px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-nav-link { font-size: calc(19px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rc-h { font-size: calc(22px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rc-cat,
+        :root[data-rfat-schrift] .rc-btn { font-size: calc(17px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rc-slot { font-size: calc(16px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rc-hint,
+        :root[data-rfat-schrift] .rc-back a { font-size: calc(15px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rc-steps li { font-size: calc(13px * var(--rfat-skala)); }
+        :root[data-rfat-schrift] .rfat-bedienung { font-size: calc(15px * var(--rfat-skala)); }
+
+        /* ============ Von rechts nach links (Arabisch) ============
+         *
+         * Nur die Stellen, an denen eine Seite fest steht. Alles andere
+         * dreht der Browser ueber dir="rtl" am <html>-Element von selbst.
+         */
+        [dir="rtl"] .rfat-topbar { justify-content: flex-start; }
+        [dir="rtl"] .rfat-pub-zeile { text-align: right; }
+        [dir="rtl"] .rfat-pub-field dd { text-align: left; }
+        [dir="rtl"] .rfat-pub-reschedule ol { padding-left: 0; padding-right: 20px; }
+        [dir="rtl"] .rfat-pub-optional { margin-left: 0; margin-right: 6px; }
+        [dir="rtl"] .rfat-pub-frage { border-left: 0; border-right: 4px solid var(--rfat-warn); }
+        [dir="rtl"] .rc-error { border-left: 0; border-right: 4px solid var(--rfat-fehler); }
+        [dir="rtl"] .rfat-nav-overlay__bar { justify-content: flex-start; }
+        /*
+         * Das Bedienfeld haengt am Knopf, und der steht bei rechtslaeufiger
+         * Schrift links — auf jeder Fenstergroesse, nicht erst am Rechner.
+         */
+        [dir="rtl"] .rfat-bedienung {
+            right: auto;
+            left: max(14px, env(safe-area-inset-left));
+        }
+        @media (min-width: 783px) {
+            [dir="rtl"] .rfat-nav-overlay__list {
+                right: auto;
+                left: max(14px, env(safe-area-inset-left));
+                transform-origin: top left;
+            }
+        }
+
+        /* ============ Bewegung ============
+         *
+         * Wer im System „Bewegung reduzieren" eingestellt hat, hat oft
+         * einen Grund dafuer, der schlimmer ist als Geschmack: Bei
+         * vestibulaeren Stoerungen loest eine schiebende Flaeche Uebelkeit
+         * aus. Ein Blenden bleibt, es bewegt sich nur nichts mehr.
+         */
+        @media (prefers-reduced-motion: reduce) {
+            .rfat-bedienung,
+            .rfat-bedienung__knopf,
+            .rfat-nav-overlay,
+            .rfat-nav-overlay__list,
+            .rfat-pub-zeile,
+            .btn {
+                transition-duration: .01ms !important;
+                animation-duration: .01ms !important;
+            }
+        }
+
+        /* ============ Das Feld „Sprache & Ansicht" ============ */
+        .rfat-topbar__gruppe { display: flex; align-items: center; gap: 10px; pointer-events: auto; }
+        .rfat-bedienung__knopf {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-width: 48px;
+            height: 48px;
+            padding: 0 12px;
+            border: 1px solid var(--rfat-rand-stark);
+            border-radius: 999px;
+            background: var(--rfat-flaeche);
+            color: var(--rfat-text);
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            font-weight: 700;
+            line-height: 1;
+            cursor: pointer;
+            box-shadow: 0 2px 8px rgba(20, 40, 30, .18);
+            transition: background .15s ease, border-color .15s ease;
+        }
+        .rfat-bedienung__knopf:hover { border-color: var(--rfat-gruen); }
+        .rfat-bedienung__kuerzel { text-transform: uppercase; letter-spacing: .04em; }
+        .rfat-topbar.is-small .rfat-bedienung__knopf { min-width: 42px; height: 42px; }
+
+        .rfat-bedienung {
+            position: fixed;
+            z-index: 99999;
+            top: 74px;
+            right: max(14px, env(safe-area-inset-right));
+            width: min(320px, calc(100vw - 28px));
+            max-height: calc(100vh - 110px);
+            overflow-y: auto;
+            box-sizing: border-box;
+            padding: 16px 18px 18px;
+            background: var(--rfat-flaeche);
+            color: var(--rfat-text);
+            border: 1px solid var(--rfat-rand);
+            border-radius: 20px;
+            box-shadow: 0 18px 44px rgba(20, 40, 30, .20), 0 2px 8px rgba(20, 40, 30, .10);
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 15px;
+            line-height: 1.45;
+        }
+        .rfat-bedienung[hidden] { display: none; }
+        .rfat-bedienung__gruppe { border: 0; margin: 0 0 16px; padding: 0; }
+        .rfat-bedienung__gruppe:last-of-type { margin-bottom: 10px; }
+        .rfat-bedienung__titel {
+            display: block;
+            margin: 0 0 8px;
+            padding: 0;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            color: var(--rfat-leise);
+        }
+        .rfat-bedienung__wahl { display: flex; flex-wrap: wrap; gap: 8px; }
+        .rfat-bedienung__wahl > * {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 44px;
+            padding: 8px 14px;
+            border: 1px solid var(--rfat-rand-stark);
+            border-radius: 12px;
+            background: var(--rfat-flaeche);
+            color: var(--rfat-text);
+            font: inherit;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .rfat-bedienung__wahl > *:hover { border-color: var(--rfat-gruen); }
+        .rfat-bedienung__wahl [aria-current="true"],
+        .rfat-bedienung__wahl [aria-pressed="true"] {
+            background: var(--rfat-gruen);
+            border-color: var(--rfat-gruen);
+            color: var(--rfat-auf-gruen);
+        }
+        .rfat-bedienung__hinweis {
+            margin: 0;
+            font-size: 12px;
+            line-height: 1.5;
+            color: var(--rfat-leise);
+        }
+        .rfat-bedienung__ab {
+            display: block;
+            margin: 10px 0 0;
+            font-size: 12px;
+            color: var(--rfat-leise);
+        }
+
+        /* Sprachen im Seitenfuss: der Weg, der auch ohne das Feld oben
+           funktioniert — reine Links, nichts zum Aufklappen. */
+        .rfat-sprachfuss {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: center;
+            gap: 6px 14px;
+            padding: 18px 16px 8px;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 13px;
+            color: var(--rfat-leise);
+        }
+        .rfat-sprachfuss a { color: var(--rfat-gruen-text); text-decoration: none; }
+        .rfat-sprachfuss a:hover { text-decoration: underline; }
+        .rfat-sprachfuss [aria-current="true"] { color: var(--rfat-text); font-weight: 700; }
+
+        /* Der Vorschlag, wenn der Browser eine andere Sprache spricht. */
+        .rfat-sprachtipp {
+            position: fixed;
+            z-index: 99997;
+            left: 50%;
+            bottom: max(14px, env(safe-area-inset-bottom));
+            transform: translateX(-50%);
+            width: min(440px, calc(100vw - 24px));
+            box-sizing: border-box;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 14px;
+            background: var(--rfat-flaeche);
+            color: var(--rfat-text);
+            border: 1px solid var(--rfat-rand-stark);
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(20, 40, 30, .22);
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+        .rfat-sprachtipp[hidden] { display: none; }
+        .rfat-sprachtipp__text { flex: 1 1 160px; margin: 0; }
+        .rfat-sprachtipp a,
+        .rfat-sprachtipp button {
+            min-height: 44px;
+            display: inline-flex;
+            align-items: center;
+            padding: 8px 14px;
+            border-radius: 12px;
+            border: 1px solid var(--rfat-gruen);
+            background: var(--rfat-gruen);
+            color: var(--rfat-auf-gruen);
+            font: inherit;
+            font-weight: 700;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .rfat-sprachtipp button {
+            background: transparent;
+            color: var(--rfat-leise);
+            border-color: transparent;
+            font-weight: 600;
+        }
+    </style>
+    <?php
+    echo rfat_minify_style_tags(ob_get_clean());
+}, 1000);
+
+/**
+ * Die gespeicherte Wahl anwenden, BEVOR etwas gemalt wird.
+ *
+ * Deshalb steht dieses Skript im Kopf und nicht im Fuss: Wer Dunkel
+ * eingestellt hat, soll nicht erst eine weisse Seite aufblitzen sehen.
+ * Das ist keine Kosmetik — genau dieses Aufblitzen ist fuer
+ * lichtempfindliche Augen das, was weh tut.
+ */
+add_action('wp_head', function () {
+    if (is_admin()) {
+        return;
+    }
+    /*
+     * Nach einem abgeschickten Formular NICHT weiterleiten: Die Antwort
+     * („Termin storniert") steht in genau dieser Antwort, und ein Neuaufruf
+     * derselben Adresse per GET zeigte sie nicht mehr.
+     */
+    $darf_wechseln = (!isset($_SERVER['REQUEST_METHOD']) || strtoupper((string) $_SERVER['REQUEST_METHOD']) !== 'POST');
+    ?>
+    <script id="rfat-bedienung-frueh">
+    (function () {
+        var wurzel = document.documentElement;
+        var speicher = null;
+        try { speicher = window.localStorage; } catch (e) { return; }
+        if (!speicher) { return; }
+
+        try {
+            var ansicht = speicher.getItem(<?php echo wp_json_encode(RFAT_ANSICHT_SCHLUESSEL); ?>);
+            if (ansicht === 'hell' || ansicht === 'dunkel' || ansicht === 'kontrast') {
+                wurzel.setAttribute('data-rfat-ansicht', ansicht);
+            }
+            var schrift = speicher.getItem(<?php echo wp_json_encode(RFAT_SCHRIFT_SCHLUESSEL); ?>);
+            if (schrift === 'gross' || schrift === 'sehr-gross') {
+                wurzel.setAttribute('data-rfat-schrift', schrift);
+            }
+        } catch (e) { /* dann eben die Standardansicht */ }
+
+        <?php if ($darf_wechseln) : ?>
+        /*
+         * Die einmal gewaehlte Sprache gilt weiter. Der Server sieht nur
+         * `?sprache=` in der Adresse (bewusst, siehe MEHRSPRACHIGKEIT) —
+         * also traegt ihn hier der Browser nach und laedt einmal neu.
+         * `replace` statt `assign`: Sonst haette der Zurueck-Knopf die
+         * deutsche Fassung im Verlauf, und man kaeme nicht mehr weg.
+         */
+        try {
+            var sprache = speicher.getItem(<?php echo wp_json_encode(RFAT_SPRACHE_SCHLUESSEL); ?>);
+            var erlaubt = <?php echo wp_json_encode(array_keys(rfat_sprachen())); ?>;
+            if (sprache && sprache !== <?php echo wp_json_encode(RFAT_SPRACHE_STANDARD); ?>
+                && erlaubt.indexOf(sprache) !== -1
+                && window.location.search.indexOf('<?php echo esc_js(RFAT_SPRACHE_PARAM); ?>=') === -1) {
+                var trenner = window.location.search ? '&' : '?';
+                window.location.replace(
+                    window.location.pathname + window.location.search + trenner
+                    + '<?php echo esc_js(RFAT_SPRACHE_PARAM); ?>=' + encodeURIComponent(sprache)
+                    + window.location.hash
+                );
+            }
+        } catch (e) { /* dann bleibt es bei Deutsch */ }
+        <?php endif; ?>
+    })();
+    </script>
+    <?php
+}, 1);
 
 /*
 
@@ -3774,6 +4748,54 @@ add_action('wp_footer', function () {
     </div>
     <?php
 }, 1001);
+
+/**
+ * Die Sprachen noch einmal im Seitenfuss.
+ *
+ * Doppelt gemoppelt? Nein: Das Feld oben braucht JavaScript, um sich zu
+ * oeffnen. Hier stehen dieselben Fassungen als gewoehnliche Links — sie
+ * funktionieren immer, sie stehen in der Suchmaschine, und sie sind der
+ * Ort, an dem man so etwas sucht.
+ */
+add_action('wp_footer', function () {
+    if (is_admin()) {
+        return;
+    }
+    $jetzt = rfat_sprache();
+    ?>
+    <nav class="rfat-sprachfuss" aria-label="<?php echo esc_attr(rfat_t('ui.sprache', 'Sprache')); ?>">
+        <?php foreach (rfat_sprachen() as $code => $info) : ?>
+            <a href="<?php echo esc_url(rfat_sprache_url($code)); ?>"
+               lang="<?php echo esc_attr($info['html']); ?>"
+               hreflang="<?php echo esc_attr($info['html']); ?>"
+               data-rfat-sprache="<?php echo esc_attr($code); ?>"
+               <?php echo $code === $jetzt ? 'aria-current="true"' : ''; ?>>
+                <?php echo esc_html($info['eigen']); ?>
+            </a>
+        <?php endforeach; ?>
+    </nav>
+    <script id="rfat-sprachfuss">
+    (function () {
+        /*
+         * Auch hier gilt die Wahl weiter: Ohne diese Zeilen waere die
+         * Sprache beim naechsten Klick auf einen Menuepunkt wieder weg.
+         */
+        var fuss = document.querySelector('.rfat-sprachfuss');
+        if (!fuss) { return; }
+        fuss.addEventListener('click', function (e) {
+            var a = e.target.closest ? e.target.closest('[data-rfat-sprache]') : null;
+            if (!a) { return; }
+            try {
+                window.localStorage.setItem(
+                    <?php echo wp_json_encode(RFAT_SPRACHE_SCHLUESSEL); ?>,
+                    a.getAttribute('data-rfat-sprache')
+                );
+            } catch (err) { /* dann gilt sie nur fuer diesen Seitenaufruf */ }
+        });
+    })();
+    </script>
+    <?php
+}, 1002);
 
 /*
  * Hier stand das E-Mail-Feld fuer die Zwischenseite nach der Buchung.
@@ -4713,6 +5735,28 @@ add_action('wp_footer', function () {
         return;
     }
     // Aktuelle Seite, um den passenden Menüpunkt zu markieren.
+    /*
+     * Die Saetze fuer den Sprachvorschlag — jeder in seiner eigenen
+     * Sprache. Sie koennen nicht ueber rfat_t() kommen: Das gibt die
+     * aktuelle Fassung zurueck, und der Vorschlag muss gerade in der
+     * ANDEREN stehen. Wer kein Deutsch liest, dem hilft „Diese Seite gibt
+     * es auch auf Englisch" nicht weiter.
+     */
+    $rfat_buch = rfat_woerterbuch();
+    $rfat_tipp_texte = [];
+    foreach (rfat_sprachen() as $rfat_code => $rfat_info) {
+        if ($rfat_code === RFAT_SPRACHE_STANDARD || !isset($rfat_buch[$rfat_code])) {
+            continue;
+        }
+        $rfat_tipp_texte[$rfat_code] = [
+            'text' => $rfat_buch[$rfat_code]['tipp.text'],
+            'ja'   => $rfat_buch[$rfat_code]['tipp.ja'],
+            'nein' => $rfat_buch[$rfat_code]['tipp.nein'],
+            'dir'  => $rfat_info['dir'],
+            'url'  => rfat_sprache_url($rfat_code),
+        ];
+    }
+
     $current = '';
     if (is_front_page() || is_home()) {
         $current = untrailingslashit(home_url('/'));
@@ -4722,21 +5766,45 @@ add_action('wp_footer', function () {
     }
     ?>
     <div class="rfat-topbar" id="rfat-topbar" hidden>
-        <button type="button" class="rfat-nav-open" id="rfat-nav-open"
-                aria-label="Menü öffnen" aria-expanded="false" aria-controls="rfat-nav-overlay">
-            <span class="rfat-burger" aria-hidden="true"><span></span><span></span><span></span></span>
-        </button>
+        <div class="rfat-topbar__gruppe">
+            <?php
+            /*
+             * Sprache und Ansicht neben dem Menue, nicht darin: Wer die
+             * Seite nicht lesen kann, findet einen Punkt „Sprache" in einem
+             * deutschen Menue nicht — er muss das Menue ja erst oeffnen und
+             * dann lesen. Ein eigener Knopf mit dem Sprachkuerzel drauf
+             * („DE", „TR") ist ohne ein Wort Deutsch zu verstehen.
+             */
+            $rfat_sprache_jetzt = rfat_sprache();
+            ?>
+            <button type="button" class="rfat-bedienung__knopf" id="rfat-bedienung-open"
+                    aria-expanded="false" aria-controls="rfat-bedienung"
+                    aria-label="<?php echo esc_attr(rfat_t('ui.bedienung', 'Sprache und Ansicht')); ?>">
+                <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                          d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3.6 9h16.8M3.6 15h16.8M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+                </svg>
+                <span class="rfat-bedienung__kuerzel"><?php echo esc_html($rfat_sprache_jetzt); ?></span>
+            </button>
+            <button type="button" class="rfat-nav-open" id="rfat-nav-open"
+                    aria-label="<?php echo esc_attr(rfat_t('ui.menue_oeffnen', 'Menü öffnen')); ?>"
+                    aria-expanded="false" aria-controls="rfat-nav-overlay">
+                <span class="rfat-burger" aria-hidden="true"><span></span><span></span><span></span></span>
+            </button>
+        </div>
     </div>
 
     <div class="rfat-nav-overlay" id="rfat-nav-overlay" hidden>
         <div class="rfat-nav-overlay__bar">
-            <button type="button" class="rfat-nav-close" id="rfat-nav-close" aria-label="Menü schließen">
+            <button type="button" class="rfat-nav-close" id="rfat-nav-close"
+                    aria-label="<?php echo esc_attr(rfat_t('ui.menue_schliessen', 'Menü schließen')); ?>">
                 <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                     <path fill="currentColor" d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19l5.6-5.6 5.6 5.6 1.4-1.4-5.6-5.6L19 6.4 17.6 5 12 10.6 6.4 5z"/>
                 </svg>
             </button>
         </div>
-        <nav class="rfat-nav-overlay__list" aria-label="Hauptmenü">
+        <nav class="rfat-nav-overlay__list"
+             aria-label="<?php echo esc_attr(rfat_t('ui.hauptmenue', 'Hauptmenü')); ?>">
             <?php foreach ($items as $item) :
                 $url       = untrailingslashit((string) $item['url']);
                 $is_active = ($url !== '' && $url === $current);
@@ -4745,12 +5813,222 @@ add_action('wp_footer', function () {
                     . ($is_active ? ' is-active' : '')
                     . ($is_book ? ' is-primary' : '');
                 ?>
-                <a class="<?php echo esc_attr($classes); ?>" href="<?php echo esc_url($item['url']); ?>"
+                <a class="<?php echo esc_attr($classes); ?>"
+                   href="<?php echo esc_url(rfat_url_mit_sprache($item['url'])); ?>"
                    <?php echo $is_active ? 'aria-current="page"' : ''; ?>>
-                    <?php echo esc_html($item['label']); ?>
+                    <?php echo esc_html(rfat_menue_label($item['url'], $item['label'])); ?>
                 </a>
             <?php endforeach; ?>
         </nav>
+    </div>
+
+    <?php
+    /*
+     * Das Feld hinter dem Knopf. Drei Fragen, mehr nicht — jede weitere
+     * Einstellung waere eine, die niemand trifft.
+     *
+     * Die Sprachen sind Links und keine Schalter: Sie fuehren auf dieselbe
+     * Seite mit `?sprache=…`, funktionieren also auch ohne JavaScript, und
+     * lassen sich weitergeben. Ansicht und Schrift koennen das nicht — sie
+     * stehen nur im Browser und nirgends sonst.
+     */
+    ?>
+    <div class="rfat-bedienung" id="rfat-bedienung" hidden
+         role="dialog" aria-labelledby="rfat-bedienung-titel">
+        <h2 class="rfat-sr" id="rfat-bedienung-titel"><?php rfat_e('ui.bedienung', 'Sprache und Ansicht'); ?></h2>
+
+        <fieldset class="rfat-bedienung__gruppe">
+            <legend class="rfat-bedienung__titel"><?php rfat_e('ui.sprache', 'Sprache'); ?></legend>
+            <div class="rfat-bedienung__wahl">
+                <?php foreach (rfat_sprachen() as $code => $info) : ?>
+                    <a href="<?php echo esc_url(rfat_sprache_url($code)); ?>"
+                       lang="<?php echo esc_attr($info['html']); ?>"
+                       hreflang="<?php echo esc_attr($info['html']); ?>"
+                       data-rfat-sprache="<?php echo esc_attr($code); ?>"
+                       <?php echo $code === $rfat_sprache_jetzt ? 'aria-current="true"' : ''; ?>>
+                        <?php echo esc_html($info['eigen']); ?>
+                    </a>
+                <?php endforeach; ?>
+            </div>
+            <span class="rfat-bedienung__ab"><?php rfat_e(
+                'ui.uebersetzung_hinweis',
+                'Impressum und Datenschutz stehen nur auf Deutsch – sie sind rechtlich verbindlich.'
+            ); ?></span>
+        </fieldset>
+
+        <fieldset class="rfat-bedienung__gruppe">
+            <legend class="rfat-bedienung__titel"><?php rfat_e('ui.ansicht', 'Ansicht'); ?></legend>
+            <div class="rfat-bedienung__wahl">
+                <button type="button" data-rfat-ansicht="auto" aria-pressed="true"><?php
+                    rfat_e('ui.ansicht_auto', 'Automatisch'); ?></button>
+                <button type="button" data-rfat-ansicht="hell" aria-pressed="false"><?php
+                    rfat_e('ui.ansicht_hell', 'Hell'); ?></button>
+                <button type="button" data-rfat-ansicht="dunkel" aria-pressed="false"><?php
+                    rfat_e('ui.ansicht_dunkel', 'Dunkel'); ?></button>
+                <button type="button" data-rfat-ansicht="kontrast" aria-pressed="false"><?php
+                    rfat_e('ui.ansicht_kontrast', 'Hoher Kontrast'); ?></button>
+            </div>
+        </fieldset>
+
+        <fieldset class="rfat-bedienung__gruppe">
+            <legend class="rfat-bedienung__titel"><?php rfat_e('ui.schrift', 'Schriftgröße'); ?></legend>
+            <div class="rfat-bedienung__wahl">
+                <button type="button" data-rfat-schrift="normal" aria-pressed="true"
+                        style="font-size:15px;"><?php rfat_e('ui.schrift_normal', 'Normal'); ?></button>
+                <button type="button" data-rfat-schrift="gross" aria-pressed="false"
+                        style="font-size:18px;"><?php rfat_e('ui.schrift_gross', 'Größer'); ?></button>
+                <button type="button" data-rfat-schrift="sehr-gross" aria-pressed="false"
+                        style="font-size:21px;"><?php rfat_e('ui.schrift_sehr_gross', 'Am größten'); ?></button>
+            </div>
+        </fieldset>
+
+        <p class="rfat-bedienung__hinweis"><?php rfat_e(
+            'ui.bedienung_hinweis',
+            'Deine Wahl bleibt nur auf diesem Gerät – gespeichert im Browser, nicht bei uns.'
+        ); ?></p>
+    </div>
+
+    <script id="rfat-bedienung">
+    (function () {
+        var knopf = document.getElementById('rfat-bedienung-open');
+        var feld  = document.getElementById('rfat-bedienung');
+        if (!knopf || !feld) { return; }
+
+        var A_SCHLUESSEL = <?php echo wp_json_encode(RFAT_ANSICHT_SCHLUESSEL); ?>;
+        var S_SCHLUESSEL = <?php echo wp_json_encode(RFAT_SCHRIFT_SCHLUESSEL); ?>;
+        var L_SCHLUESSEL = <?php echo wp_json_encode(RFAT_SPRACHE_SCHLUESSEL); ?>;
+        var wurzel = document.documentElement;
+
+        /*
+         * Jeder Zugriff einzeln abgesichert: Im privaten Fenster und mit
+         * gesperrtem Speicher wirft schon das Lesen. Dann bleibt es bei der
+         * Standardansicht — kaputt gehen darf die Seite davon nicht.
+         */
+        function merken(schluessel, wert) {
+            try {
+                if (wert === null) { window.localStorage.removeItem(schluessel); }
+                else { window.localStorage.setItem(schluessel, wert); }
+            } catch (e) { /* dann gilt die Wahl nur fuer diesen Besuch */ }
+        }
+        function gemerkt(schluessel) {
+            try { return window.localStorage.getItem(schluessel); } catch (e) { return null; }
+        }
+
+        /* Welcher Knopf gedrueckt aussieht — abgeleitet vom Wurzelelement,
+           damit Anzeige und Wirkung nicht auseinanderlaufen koennen. */
+        function standAnzeigen() {
+            var ansicht = wurzel.getAttribute('data-rfat-ansicht') || 'auto';
+            var schrift = wurzel.getAttribute('data-rfat-schrift') || 'normal';
+            Array.prototype.forEach.call(feld.querySelectorAll('[data-rfat-ansicht]'), function (b) {
+                b.setAttribute('aria-pressed', b.getAttribute('data-rfat-ansicht') === ansicht ? 'true' : 'false');
+            });
+            Array.prototype.forEach.call(feld.querySelectorAll('[data-rfat-schrift]'), function (b) {
+                b.setAttribute('aria-pressed', b.getAttribute('data-rfat-schrift') === schrift ? 'true' : 'false');
+            });
+        }
+
+        function feldOeffnen() {
+            /*
+             * Beide Felder gleichzeitig offen waeren zwei Kaesten
+             * uebereinander an derselben Ecke. Das Menue hat seinen eigenen
+             * Schliessen-Knopf — den zu druecken ist sauberer, als seinen
+             * Zustand von hier aus anzufassen.
+             */
+            var navFeld = document.getElementById('rfat-nav-overlay');
+            var navZu = document.getElementById('rfat-nav-close');
+            if (navFeld && !navFeld.hidden && navZu) { navZu.click(); }
+
+            feld.hidden = false;
+            knopf.setAttribute('aria-expanded', 'true');
+            document.addEventListener('keydown', aufTaste);
+            document.addEventListener('click', aufKlickAussen, true);
+        }
+        function feldSchliessen(zurueckAufKnopf) {
+            feld.hidden = true;
+            knopf.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('keydown', aufTaste);
+            document.removeEventListener('click', aufKlickAussen, true);
+            if (zurueckAufKnopf) { knopf.focus(); }
+        }
+        function aufTaste(e) {
+            if (e.key === 'Escape') { feldSchliessen(true); }
+        }
+        function aufKlickAussen(e) {
+            if (!feld.contains(e.target) && e.target !== knopf && !knopf.contains(e.target)) {
+                feldSchliessen(false);
+            }
+        }
+
+        knopf.addEventListener('click', function () {
+            if (feld.hidden) { feldOeffnen(); } else { feldSchliessen(true); }
+        });
+
+        feld.addEventListener('click', function (e) {
+            var ziel = e.target.closest ? e.target.closest('[data-rfat-ansicht],[data-rfat-schrift],[data-rfat-sprache]') : null;
+            if (!ziel) { return; }
+
+            if (ziel.hasAttribute('data-rfat-ansicht')) {
+                var a = ziel.getAttribute('data-rfat-ansicht');
+                if (a === 'auto') { wurzel.removeAttribute('data-rfat-ansicht'); merken(A_SCHLUESSEL, null); }
+                else { wurzel.setAttribute('data-rfat-ansicht', a); merken(A_SCHLUESSEL, a); }
+                standAnzeigen();
+            } else if (ziel.hasAttribute('data-rfat-schrift')) {
+                var s = ziel.getAttribute('data-rfat-schrift');
+                if (s === 'normal') { wurzel.removeAttribute('data-rfat-schrift'); merken(S_SCHLUESSEL, null); }
+                else { wurzel.setAttribute('data-rfat-schrift', s); merken(S_SCHLUESSEL, s); }
+                standAnzeigen();
+            } else {
+                /* Sprache: Der Link laedt gleich neu, gemerkt wird davor —
+                   sonst faellt der naechste Aufruf wieder auf Deutsch. */
+                merken(L_SCHLUESSEL, ziel.getAttribute('data-rfat-sprache'));
+            }
+        });
+
+        standAnzeigen();
+
+        /* ---- Vorschlag, wenn der Browser eine andere Sprache spricht ----
+         *
+         * Nur ein Angebot. Ein automatischer Sprung waere uebergriffig:
+         * Viele stellen ihr Geraet auf Englisch und lesen trotzdem lieber
+         * die deutsche Fassung, weil dort die Ortsnamen stimmen.
+         */
+        var tipp = document.getElementById('rfat-sprachtipp');
+        var texte = <?php echo wp_json_encode($rfat_tipp_texte); ?>;
+        if (tipp && !gemerkt(L_SCHLUESSEL) && window.location.search.indexOf('<?php echo esc_js(RFAT_SPRACHE_PARAM); ?>=') === -1) {
+            var wunsch = null;
+            var liste = navigator.languages || [navigator.language || ''];
+            for (var i = 0; i < liste.length && !wunsch; i++) {
+                var kurz = String(liste[i]).toLowerCase().split('-')[0];
+                if (kurz === <?php echo wp_json_encode(RFAT_SPRACHE_STANDARD); ?>) { break; }
+                if (texte[kurz]) { wunsch = kurz; }
+            }
+            if (wunsch) {
+                var t = texte[wunsch];
+                var satz = document.getElementById('rfat-sprachtipp-text');
+                var ja   = document.getElementById('rfat-sprachtipp-ja');
+                var nein = document.getElementById('rfat-sprachtipp-nein');
+                tipp.setAttribute('lang', wunsch);
+                tipp.setAttribute('dir', t.dir);
+                satz.textContent = t.text;
+                ja.textContent = t.ja;
+                ja.href = t.url;
+                ja.setAttribute('lang', wunsch);
+                nein.textContent = t.nein;
+                ja.addEventListener('click', function () { merken(L_SCHLUESSEL, wunsch); });
+                nein.addEventListener('click', function () {
+                    merken(L_SCHLUESSEL, <?php echo wp_json_encode(RFAT_SPRACHE_STANDARD); ?>);
+                    tipp.hidden = true;
+                });
+                tipp.hidden = false;
+            }
+        }
+    })();
+    </script>
+
+    <div class="rfat-sprachtipp" id="rfat-sprachtipp" hidden>
+        <p class="rfat-sprachtipp__text" id="rfat-sprachtipp-text"></p>
+        <a class="rfat-sprachtipp__ja" id="rfat-sprachtipp-ja" href="#"></a>
+        <button type="button" id="rfat-sprachtipp-nein"></button>
     </div>
 
     <script id="rfat-mobile-nav">
@@ -4773,14 +6051,44 @@ add_action('wp_footer', function () {
          * dort weggeräumt — die Seite stünde ohne jede Navigation da.
          */
         var themeToggle = document.querySelector('.wp-block-navigation__responsive-container-open');
+
+        /*
+         * Die Leiste steht im Quelltext am Ende der Seite (wp_footer) —
+         * fuer die Tastatur hiess das: erst durch den ganzen Inhalt, dann
+         * erst zur Navigation. Fuer jemanden, der nicht zeigen kann, ist
+         * das jedes Mal die komplette Seite. Also vor der Ausgabe an den
+         * Anfang haengen; sichtbar aendert sich nichts, sie schwebt ohnehin.
+         */
+        function leisteNachVorn() {
+            /*
+             * Vor allem — mit einer Ausnahme: WordPress setzt bei
+             * Block-Themes selbst einen „Zum Inhalt springen"-Link an den
+             * Anfang. Der gehoert dorthin und soll der erste Halt bleiben;
+             * unsere Leiste kommt gleich dahinter.
+             */
+            var sprung = document.querySelector('body > .skip-link, body > .screen-reader-shortcut');
+            var ziel = sprung ? sprung.nextSibling : document.body.firstChild;
+            if (topbar !== ziel && topbar.parentNode !== null) {
+                document.body.insertBefore(topbar, ziel);
+            }
+        }
+
         if (themeToggle && themeToggle.offsetParent !== null) {
             document.documentElement.classList.add('rfat-nav-core');
-            topbar.parentNode.removeChild(topbar);
+            /*
+             * Nur der Hamburger geht — die Leiste bleibt: In ihr sitzt der
+             * Knopf fuer Sprache und Ansicht, und der hat mit dem Menue des
+             * Themes nichts zu tun.
+             */
+            openBtn.parentNode.removeChild(openBtn);
             overlay.parentNode.removeChild(overlay);
+            topbar.hidden = false;
+            leisteNachVorn();
             return;   // .rfat-nav-core blendet das Theme-Menü wieder ein
         }
         document.documentElement.classList.add('rfat-nav-fallback');
         topbar.hidden = false;
+        leisteNachVorn();
 
 <?php /* Nur ausliefern, wenn beim Rendern nichts entfernt wurde. */
        if (empty($GLOBALS['rfat_nav_markiert'])) : ?>
@@ -5331,6 +6639,14 @@ define('RFAT_FRAGEN_ABSATZ', '<h2>Rückfragen zu deinem Termin</h2><p>Manchmal m
  * frisch angelegte Datenschutzseite als auch nachträglich in eine
  * bestehende.
  */
+/*
+ * Sprache, Ansicht und Schriftgroesse liegen im Browser — siehe
+ * BEDIENUNG. Kein Cookie, nichts, was uns erreicht; gesagt werden muss
+ * es trotzdem: Der TDDDG unterscheidet nicht zwischen Cookie und
+ * localStorage, und eine Erklaerung, in der die Haelfte fehlt, ist keine.
+ */
+define('RFAT_BEDIENUNG_ABSATZ', '<h2>Sprache und Ansicht</h2><p>Oben rechts lassen sich <strong>Sprache</strong>, <strong>Ansicht</strong> (automatisch, hell, dunkel, hoher Kontrast) und <strong>Schriftgröße</strong> einstellen. Diese drei Angaben legt dein Browser <strong>auf deinem Gerät</strong> ab (localStorage) – so wie den Buchungscode. Sie werden <strong>nicht an uns übertragen</strong>, sind für andere Websites nicht lesbar und dienen allein dazu, dir die Seite beim nächsten Besuch so zu zeigen, wie du sie eingestellt hast. Das ist für die von dir gewünschte Funktion erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG). Die gewählte Sprache steht zusätzlich als <code>?sprache=…</code> in der Adresszeile – damit lässt sich eine Seite in dieser Sprache weitergeben. Zurücksetzen kannst du alles jederzeit über „Ansicht: Automatisch" und „Sprache: Deutsch" oder indem du in deinem Browser die Websitedaten für diese Seite löschst.</p>');
+
 define('RFAT_SIGNAL_ABSATZ', '<h2>Freiwilliger Kontakt über Signal</h2><p>Statt einer E-Mail-Adresse – oder zusätzlich dazu – kannst du freiwillig deinen <strong>Signal-Benutzernamen</strong> oder deinen <strong>Signal-Link</strong> hinterlegen, damit wir dich zu deinem Termin erreichen können. Auch diese Angabe ist <strong>nicht erforderlich</strong>; ohne sie ändert sich nichts. Gespeichert wird ausschließlich, was du selbst einträgst – der Benutzername oder der Link, den Signal für dich erzeugt. <strong>Deine Telefonnummer bekommen wir dabei nicht zu sehen</strong>; genau dafür gibt es Benutzername und Link bei Signal. Der Link enthält keinen Klartext-Namen, sondern eine Kennung, mit der Signal deinen dort verschlüsselt abgelegten Benutzernamen findet.</p><p><strong>Rechtsgrundlage:</strong> deine Einwilligung (Art. 6 Abs. 1 lit. a DSGVO).</p><p><strong>Speicherdauer:</strong> wie bei der E-Mail-Adresse. Nach deinem Termin wird die Angabe automatisch gelöscht, bei einer Stornierung sofort. Mit dem Häkchen „Meine Angaben dürfen auch nach dem Termin gespeichert bleiben" bleibt sie, bis du sie selbst wieder löschst.</p><p><strong>Widerruf:</strong> Rufe deinen Termin unter <a href="/termin-abrufen/">Termin abrufen</a> mit deinem Buchungscode auf, leere das Signal-Feld und speichere.</p><p><strong>Empfänger:</strong> Schreiben wir dir über Signal, läuft die Nachricht über den Dienst der Signal Messenger, LLC; deren Bedingungen und deren Ende-zu-Ende-Verschlüsselung gelten dann zusätzlich. Deine Angabe geben wir nicht an Dritte weiter und verwenden sie nicht für Werbung.</p>');
 
 /**
@@ -5651,6 +6967,9 @@ function rfat_datenschutz_text_pflegen($alt) {
     $neu = rfat_absatz_setzen($neu, '<h2>Cookies</h2>', '<h2>Cookies</h2>' . RFAT_COOKIE_ABSATZ,
         ['<h2>Server-Protokolle</h2>']);
 
+    $neu = rfat_absatz_setzen($neu, '<h2>Sprache und Ansicht</h2>', RFAT_BEDIENUNG_ABSATZ,
+        ['<h2>Server-Protokolle</h2>', '<h2>Deine Rechte</h2>']);
+
     return $neu;
 }
 
@@ -5704,7 +7023,7 @@ function rfat_datenschutz_signal_absatz() {
  * Fassung des Signal-Absatzes. Hochzählen, wenn sich der Text ändert —
  * dann zieht die Routine ihn auf bestehenden Seiten nach.
  */
-define('RFAT_DS_SIGNAL_FASSUNG', '3');
+define('RFAT_DS_SIGNAL_FASSUNG', '4');   // 4: Abschnitt „Sprache und Ansicht"
 
 add_action('init', function () {
     if (get_option('rfat_ds_signal') === RFAT_DS_SIGNAL_FASSUNG) {
@@ -6306,7 +7625,12 @@ if (!function_exists('rc_build_slots')) {
             if ($v === null || $v === '') continue;
             $url = add_query_arg($k, $v, $url);
         }
-        return $url;
+        /*
+         * Der Ablauf hat drei Schritte. Ohne diese Zeile faellt er beim
+         * zweiten Klick auf Deutsch zurueck — und wer hier gelandet ist,
+         * weil er Deutsch nicht liest, steht dann wieder davor.
+         */
+        return rfat_url_mit_sprache($url);
     }
 
     function rc_slot_by_id($id) {
@@ -6328,20 +7652,22 @@ if (!function_exists('rc_build_slots')) {
         $limit = rfat_buchung_limit();
         if ($limit < 2) $limit = RFAT_LIMIT_DEFAULT;
         return array(
-            'nonce'     => 'Die Sicherheitsprüfung ist fehlgeschlagen. Das passiert meist, wenn die Seite lange offen lag. Bitte den Termin noch einmal auswählen.',
-            'weg'       => 'Diesen Termin gibt es nicht mehr. Bitte einen anderen wählen.',
-            'belegt'    => 'Dieser Termin ist gerade vergeben worden. Bitte einen anderen wählen.',
-            'speichern' => 'Das Speichern hat nicht geklappt. Bitte noch einmal versuchen.',
+            'nonce'     => rfat_t('fehler.nonce', 'Die Sicherheitsprüfung ist fehlgeschlagen. Das passiert meist, wenn die Seite lange offen lag. Bitte den Termin noch einmal auswählen.'),
+            'weg'       => rfat_t('fehler.weg', 'Diesen Termin gibt es nicht mehr. Bitte einen anderen wählen.'),
+            'belegt'    => rfat_t('fehler.belegt', 'Dieser Termin ist gerade vergeben worden. Bitte einen anderen wählen.'),
+            'speichern' => rfat_t('fehler.speichern', 'Das Speichern hat nicht geklappt. Bitte noch einmal versuchen.'),
             /*
              * Die Sperre erklärt sich selbst und sagt den Ausweg dazu. Ein
              * blosses "nicht möglich" liest sich wie ein Fehler der Seite -
              * dann versucht man es dreimal und schreibt uns dann verärgert.
              */
-            'zuviel'    => 'Von diesem Anschluss sind bereits ' . $limit . ' Termine'
-                           . ' gebucht - mehr geht gleichzeitig nicht, damit für alle etwas übrig bleibt. '
-                           . 'Sagst du einen davon unter „Termin abrufen" ab, ist sofort wieder ein Platz frei. '
-                           . 'Brauchst du wirklich mehr Termine, schreib uns kurz eine E-Mail.',
-            'zuschnell' => 'Das ging sehr schnell hintereinander. Bitte warte einen Moment und schick die Anfrage dann noch einmal ab.',
+            'zuviel'    => sprintf(rfat_t(
+                'fehler.zuviel',
+                'Von diesem Anschluss sind bereits %d Termine gebucht - mehr geht gleichzeitig nicht, '
+                . 'damit für alle etwas übrig bleibt. Sagst du einen davon unter „Termin abrufen" ab, '
+                . 'ist sofort wieder ein Platz frei. Brauchst du wirklich mehr Termine, schreib uns kurz eine E-Mail.'
+            ), $limit),
+            'zuschnell' => rfat_t('fehler.zuschnell', 'Das ging sehr schnell hintereinander. Bitte warte einen Moment und schick die Anfrage dann noch einmal ab.'),
         );
     }
 
@@ -6434,7 +7760,9 @@ if (!function_exists('rc_build_slots')) {
          * laesst sich der Termin gleich verschieben oder absagen. Ein Klick
          * weniger, und nichts geht verloren.
          */
-        wp_safe_redirect(home_url('/termin-abrufen/?code=' . rawurlencode($res['code']) . '&neu=1'));
+        wp_safe_redirect(rfat_url_mit_sprache(
+            home_url('/termin-abrufen/?code=' . rawurlencode($res['code']) . '&neu=1')
+        ));
         exit;
     }, 5);
 
@@ -6454,7 +7782,15 @@ if (!function_exists('rc_build_slots')) {
          */
         if (!empty($_GET['code'])) {
             $code = sanitize_text_field(wp_unslash($_GET['code']));
-            wp_safe_redirect(home_url('/termin-abrufen/?code=' . rawurlencode($code)), 301);
+            /*
+              * Ohne 301: Eine dauerhafte Weiterleitung wird vom Browser
+              * gespeichert, und mit `?sprache=` haengt jetzt die Sprache
+              * daran — die duerfte er nicht fuer alle kuenftigen Aufrufe
+              * festhalten. 302 leitet genauso, merkt es sich aber nicht.
+              */
+            wp_safe_redirect(rfat_url_mit_sprache(
+                home_url('/termin-abrufen/?code=' . rawurlencode($code))
+            ), 302);
             exit;
         }
 
@@ -6504,8 +7840,14 @@ if (!function_exists('rc_build_slots')) {
 
     /* Zeigt, wo man im Ablauf steht - drei Schritte sind sonst schwer zu ueberblicken. */
     function rc_step_marker($aktiv) {
-        $namen = array(1 => 'Was', 2 => 'Wann', 3 => 'Abschicken');
-        $out = '<ol class="rc-steps" aria-label="Schritt ' . (int) $aktiv . ' von 3">';
+        $namen = array(
+            1 => rfat_t('buchen.schritt_was',        'Was'),
+            2 => rfat_t('buchen.schritt_wann',       'Wann'),
+            3 => rfat_t('buchen.schritt_abschicken', 'Abschicken'),
+        );
+        $out = '<ol class="rc-steps" aria-label="'
+             . esc_attr(sprintf(rfat_t('buchen.schritt_von', 'Schritt %1$d von %2$d'), (int) $aktiv, 3))
+             . '">';
         foreach ($namen as $nr => $name) {
             $klasse = $nr === $aktiv ? 'is-now' : ($nr < $aktiv ? 'is-done' : '');
             $out .= '<li class="' . $klasse . '"><span class="rc-step-nr">' . $nr . '</span>'
@@ -6519,11 +7861,11 @@ if (!function_exists('rc_build_slots')) {
         <div class="rc-book">
           <?php echo rc_booking_error_html(); ?>
           <?php echo rc_step_marker(1); ?>
-          <h2 class="rc-h">Was möchtest du reparieren?</h2>
+          <h2 class="rc-h"><?php rfat_e('buchen.was_frage', 'Was möchtest du reparieren?'); ?></h2>
           <?php $rc_cats = rc_categories(); ?>
           <?php if (!$rc_cats): ?>
             <?php // Alle Kategorien stillgelegt — dann lieber ein Satz als eine leere Fläche. ?>
-            <p>Zurzeit nehmen wir keine Termine an. Schau in ein paar Tagen noch einmal vorbei.</p>
+            <p><?php rfat_e('buchen.keine_kategorien', 'Zurzeit nehmen wir keine Termine an. Schau in ein paar Tagen noch einmal vorbei.'); ?></p>
           <?php else: ?>
             <div class="rc-cats">
               <?php foreach ($rc_cats as $ck => $cl): ?>
@@ -6542,7 +7884,13 @@ if (!function_exists('rc_build_slots')) {
         $days = array();
         foreach (rc_build_slots() as $s) {
             if ($s['cat'] !== $cat) continue;
-            if (!isset($days[$s['date']])) $days[$s['date']] = array('label' => $s['dateLabel'], 'items' => array());
+            /*
+             * `dateLabel` ist der deutsche Text aus rc_build_slots(); er
+             * steht so im Titel der Buchung und bleibt dort auch deutsch,
+             * weil ihn nur die Werkstatt liest. Angezeigt wird das Datum in
+             * der Sprache der Seite, gerechnet aus dem Tag selbst.
+             */
+            if (!isset($days[$s['date']])) $days[$s['date']] = array('datum' => rfat_datum_aus_ymd($s['date']), 'items' => array());
             $s['free'] = empty($booked[$s['id']]);
             $days[$s['date']]['items'][] = $s;
         }
@@ -6550,23 +7898,24 @@ if (!function_exists('rc_build_slots')) {
 
         ob_start(); ?>
         <div class="rc-book">
-          <p class="rc-back"><a href="<?php echo esc_url(rc_booking_page_url()); ?>">&larr; andere Kategorie</a></p>
+          <p class="rc-back"><a href="<?php echo esc_url(rc_booking_page_url()); ?>">&larr; <?php
+              rfat_e('buchen.zurueck_kategorie', 'andere Kategorie'); ?></a></p>
           <?php echo rc_booking_error_html(); ?>
           <?php echo rc_step_marker(2); ?>
-          <h2 class="rc-h">Freien Termin wählen</h2>
+          <h2 class="rc-h"><?php rfat_e('buchen.wann_frage', 'Freien Termin wählen'); ?></h2>
           <p class="rc-chosen"><?php echo esc_html($cats[$cat]); ?></p>
           <?php if (!$days): ?>
-            <p>Zurzeit sind keine Termine frei. Schau in ein paar Tagen noch einmal vorbei.</p>
+            <p><?php rfat_e('buchen.keine_termine', 'Zurzeit sind keine Termine frei. Schau in ein paar Tagen noch einmal vorbei.'); ?></p>
           <?php endif; ?>
           <?php foreach ($days as $day): ?>
             <div class="rc-daygroup">
-              <h3><?php echo esc_html($day['label']); ?></h3>
+              <h3><?php echo esc_html($day['datum']); ?></h3>
               <div class="rc-slotgrid">
                 <?php foreach ($day['items'] as $s): ?>
                   <?php if ($s['free']): ?>
-                    <a class="rc-slot" href="<?php echo esc_url(rc_booking_page_url(array('was' => $cat, 'wann' => $s['id']))); ?>"><?php echo esc_html($s['time']); ?> Uhr</a>
+                    <a class="rc-slot" href="<?php echo esc_url(rc_booking_page_url(array('was' => $cat, 'wann' => $s['id']))); ?>"><?php echo esc_html(rfat_uhrzeit($s['time'])); ?></a>
                   <?php else: ?>
-                    <span class="rc-slot is-taken" title="schon vergeben"><?php echo esc_html($s['time']); ?> Uhr</span>
+                    <span class="rc-slot is-taken" title="<?php echo esc_attr(rfat_t('buchen.vergeben', 'schon vergeben')); ?>"><?php echo esc_html(rfat_uhrzeit($s['time'])); ?></span>
                   <?php endif; ?>
                 <?php endforeach; ?>
               </div>
@@ -6580,18 +7929,24 @@ if (!function_exists('rc_build_slots')) {
         $cats = rc_categories();
         ob_start(); ?>
         <div class="rc-book">
-          <p class="rc-back"><a href="<?php echo esc_url(rc_booking_page_url(array('was' => $slot['cat']))); ?>">&larr; anderer Termin</a></p>
+          <p class="rc-back"><a href="<?php echo esc_url(rc_booking_page_url(array('was' => $slot['cat']))); ?>">&larr; <?php
+              rfat_e('buchen.zurueck_termin', 'anderer Termin'); ?></a></p>
           <?php echo rc_booking_error_html(); ?>
           <?php echo rc_step_marker(3); ?>
-          <h2 class="rc-h">Anfrage abschicken</h2>
-          <p class="rc-summary"><?php echo esc_html($cats[$slot['cat']] . ' — ' . $slot['dateLabel'] . ', ' . $slot['time'] . ' Uhr'); ?></p>
+          <h2 class="rc-h"><?php rfat_e('buchen.abschicken_kopf', 'Anfrage abschicken'); ?></h2>
+          <p class="rc-summary"><?php echo esc_html(
+              $cats[$slot['cat']] . ' — ' . rfat_datum_aus_ymd($slot['date']) . ', ' . rfat_uhrzeit($slot['time'])
+          ); ?></p>
           <form method="post" action="<?php echo esc_url(rc_booking_page_url(array('was' => $slot['cat'], 'wann' => $slot['id']))); ?>">
             <?php wp_nonce_field('rc_book', 'rc_nonce'); ?>
             <input type="hidden" name="slot" value="<?php echo esc_attr($slot['id']); ?>">
-            <label class="rc-note-label" for="rc-note">Was ist kaputt? <span>(freiwillig)</span></label>
-            <textarea id="rc-note" name="note" rows="3" maxlength="300" placeholder="z. B. 'Handy-Akku hält nicht mehr' oder 'E-Bike bremst schleift'"></textarea>
-            <button type="submit" name="rc_book_submit" value="1" class="rc-btn">Termin anfragen</button>
-            <p class="rc-hint">Noch nicht bestätigt — wir sehen uns die Anfrage an und melden uns.</p>
+            <label class="rc-note-label" for="rc-note"><?php rfat_e('buchen.was_kaputt', 'Was ist kaputt?'); ?>
+                <span>(<?php rfat_e('buchen.freiwillig', 'freiwillig'); ?>)</span></label>
+            <textarea id="rc-note" name="note" rows="3" maxlength="300"
+                      placeholder="<?php echo esc_attr(rfat_t('buchen.beispiel', "z. B. 'Handy-Akku hält nicht mehr' oder 'E-Bike bremst schleift'")); ?>"></textarea>
+            <button type="submit" name="rc_book_submit" value="1" class="rc-btn"><?php
+                rfat_e('buchen.absenden', 'Termin anfragen'); ?></button>
+            <p class="rc-hint"><?php rfat_e('buchen.hinweis', 'Noch nicht bestätigt — wir sehen uns die Anfrage an und melden uns.'); ?></p>
           </form>
         </div>
         <?php return ob_get_clean();
@@ -6616,50 +7971,50 @@ if (!function_exists('rc_build_slots')) {
           .rc-book{max-width:620px}
           .rc-h{margin:0 0 14px;font-size:22px}
           .rc-back{margin:0 0 10px}
-          .rc-back a{color:#1f5a38;font-weight:600;text-decoration:none;font-size:15px}
+          .rc-back a{color:var(--rfat-gruen-text);font-weight:600;text-decoration:none;font-size:15px}
           .rc-back a:hover{text-decoration:underline}
           .rc-cats{display:grid;gap:12px}
-          .rc-cat{display:block;background:#e8f1eb;border:2px solid transparent;border-radius:12px;padding:18px;
-            font-size:17px;font-weight:700;color:#1c2a22;text-decoration:none}
-          .rc-cat:hover,.rc-cat:focus{border-color:#2f7d4f;color:#1c2a22}
-          .rc-chosen{color:#5b6b62;margin:0 0 18px}
+          .rc-cat{display:block;background:var(--rfat-gruen-flaeche);border:2px solid transparent;border-radius:12px;padding:18px;
+            font-size:17px;font-weight:700;color:var(--rfat-text);text-decoration:none}
+          .rc-cat:hover,.rc-cat:focus{border-color:var(--rfat-gruen);color:var(--rfat-text)}
+          .rc-chosen{color:var(--rfat-leise);margin:0 0 18px}
           .rc-daygroup{margin-bottom:18px}
-          .rc-daygroup h3{margin:0 0 8px;font-size:15px;color:#5b6b62;font-weight:600}
+          .rc-daygroup h3{margin:0 0 8px;font-size:15px;color:var(--rfat-leise);font-weight:600}
           .rc-slotgrid{display:flex;flex-wrap:wrap;gap:8px}
-          .rc-slot{display:inline-block;background:#fff;border:2px solid #2f7d4f;color:#1f5a38;border-radius:10px;
+          .rc-slot{display:inline-block;background:var(--rfat-flaeche);border:2px solid var(--rfat-gruen);color:var(--rfat-gruen-text);border-radius:10px;
             padding:11px 16px;font-weight:700;font-size:16px;text-decoration:none;min-height:44px;line-height:20px;box-sizing:border-box}
-          .rc-slot:hover,.rc-slot:focus{background:#2f7d4f;color:#fff}
-          .rc-slot.is-taken{border-color:#dfe4e0;color:#b7c1ba;background:#f4f6f4;text-decoration:line-through;cursor:not-allowed}
-          .rc-slot.is-taken:hover{background:#f4f6f4;color:#b7c1ba}
-          .rc-summary{background:#e8f1eb;border-radius:10px;padding:12px 14px;font-weight:600;margin:0 0 16px}
+          .rc-slot:hover,.rc-slot:focus{background:var(--rfat-gruen);color:var(--rfat-auf-gruen)}
+          .rc-slot.is-taken{border-color:var(--rfat-rand);color:var(--rfat-leiser);background:var(--rfat-flaeche-2);text-decoration:line-through;cursor:not-allowed}
+          .rc-slot.is-taken:hover{background:var(--rfat-flaeche-2);color:var(--rfat-leiser)}
+          .rc-summary{background:var(--rfat-gruen-flaeche);border-radius:10px;padding:12px 14px;font-weight:600;margin:0 0 16px}
           .rc-note-label{display:block;margin:6px 0 6px;font-weight:600}
-          .rc-note-label span{font-weight:400;color:#5b6b62;font-size:14px}
-          #rc-note{width:100%;border:1px solid #cfd8d2;border-radius:10px;padding:10px;font:inherit;margin-bottom:16px;box-sizing:border-box}
-          .rc-btn{display:inline-block;background:#2f7d4f;color:#fff;border:0;border-radius:10px;padding:14px 22px;
+          .rc-note-label span{font-weight:400;color:var(--rfat-leise);font-size:14px}
+          #rc-note{width:100%;border:1px solid var(--rfat-rand-stark);border-radius:10px;padding:10px;font:inherit;margin-bottom:16px;box-sizing:border-box}
+          .rc-btn{display:inline-block;background:var(--rfat-gruen);color:var(--rfat-auf-gruen);border:0;border-radius:10px;padding:14px 22px;
             font-size:17px;font-weight:700;cursor:pointer;text-decoration:none;font-family:inherit}
-          .rc-btn:hover,.rc-btn:focus{background:#1f5a38;color:#fff}
-          .rc-hint{color:#5b6b62;font-size:14.5px;margin-top:12px}
-          .rc-error{background:#fdecec;border-left:4px solid #a12;color:#7a1010;font-weight:600;padding:12px 14px;
+          .rc-btn:hover,.rc-btn:focus{background:var(--rfat-gruen-text);color:var(--rfat-auf-gruen)}
+          .rc-hint{color:var(--rfat-leise);font-size:14.5px;margin-top:12px}
+          .rc-error{background:var(--rfat-fehler-flaeche);border-left:4px solid var(--rfat-fehler);color:var(--rfat-fehler-text);font-weight:600;padding:12px 14px;
             border-radius:8px;margin:0 0 16px}
           /* Gezeichneter Haken statt Emoji: das ✅ rendert auf iOS als klobiger
              gruener Kasten und passte nicht zur uebrigen Seite. */
-          .rc-ok{width:52px;height:52px;border-radius:50%;background:#2f7d4f;position:relative;margin-bottom:14px}
+          .rc-ok{width:52px;height:52px;border-radius:50%;background:var(--rfat-gruen);position:relative;margin-bottom:14px}
           .rc-ok::after{content:"";position:absolute;left:18px;top:11px;width:12px;height:24px;
-            border:solid #fff;border-width:0 3.5px 3.5px 0;transform:rotate(45deg)}
+            border:solid var(--rfat-auf-gruen);border-width:0 3.5px 3.5px 0;transform:rotate(45deg)}
 
           /* Schrittanzeige */
           .rc-steps{display:flex;gap:8px;list-style:none;margin:0 0 18px;padding:0;counter-reset:none}
-          .rc-steps li{display:flex;align-items:center;gap:7px;font-size:13px;color:#9aa8a0;flex:0 1 auto}
-          .rc-steps li+li::before{content:"";display:block;width:14px;height:1px;background:#dfe4e0;margin-right:1px}
+          .rc-steps li{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--rfat-leiser);flex:0 1 auto}
+          .rc-steps li+li::before{content:"";display:block;width:14px;height:1px;background:var(--rfat-rand);margin-right:1px}
           .rc-step-nr{display:grid;place-items:center;width:23px;height:23px;border-radius:50%;
-            background:#eef2ef;color:#9aa8a0;font-size:12px;font-weight:700;flex-shrink:0}
-          .rc-steps li.is-now{color:#1c2a22;font-weight:600}
-          .rc-steps li.is-now .rc-step-nr{background:#2f7d4f;color:#fff}
-          .rc-steps li.is-done{color:#5b6b62}
-          .rc-steps li.is-done .rc-step-nr{background:#cde0d4;color:#1f5a38}
-          .rc-code{font-size:24px;letter-spacing:1px;color:#1f5a38}
+            background:var(--rfat-flaeche-2);color:var(--rfat-leiser);font-size:12px;font-weight:700;flex-shrink:0}
+          .rc-steps li.is-now{color:var(--rfat-text);font-weight:600}
+          .rc-steps li.is-now .rc-step-nr{background:var(--rfat-gruen);color:var(--rfat-auf-gruen)}
+          .rc-steps li.is-done{color:var(--rfat-leise)}
+          .rc-steps li.is-done .rc-step-nr{background:var(--rfat-gruen-flaeche-2);color:var(--rfat-gruen-text)}
+          .rc-code{font-size:24px;letter-spacing:1px;color:var(--rfat-gruen-text)}
           .rc-again{margin-top:26px}
-          .rc-again a{color:#1f5a38;font-weight:600}
+          .rc-again a{color:var(--rfat-gruen-text);font-weight:600}
           @media(max-width:600px){
             .rc-steps li:not(.is-now) .rc-step-name{display:none}
             .rc-slot{flex:1 1 calc(50% - 8px);text-align:center}
@@ -6744,6 +8099,7 @@ if (!function_exists('rc_build_slots')) {
     <!--RFAT_MISSBRAUCH-->
     <h2>Cookies</h2>
     <!--RFAT_COOKIES-->
+    <!--RFAT_BEDIENUNG-->
     <h2>Server-Protokolle</h2>
     <p>Beim Aufruf verarbeitet der Betrieb technisch bedingt Zugriffsdaten (IP-Adresse, Datum/Uhrzeit, aufgerufene Seite, Datenmenge, Browsertyp). Diese dienen ausschließlich dem sicheren, stabilen Betrieb und der Abwehr von Angriffen (Art. 6 Abs. 1 lit. f DSGVO) und werden nur kurz gespeichert.</p>
     <h2>Auslieferung über Cloudflare (CDN)</h2>
@@ -6760,6 +8116,7 @@ if (!function_exists('rc_build_slots')) {
         $dsg = str_replace('<!--RFAT_MISSBRAUCH-->', RFAT_MISSBRAUCH_ABSATZ, $dsg);
         $dsg = str_replace('<!--RFAT_SIGNAL-->', RFAT_SIGNAL_ABSATZ, $dsg);
         $dsg = str_replace('<!--RFAT_FRAGEN-->', RFAT_FRAGEN_ABSATZ, $dsg);
+        $dsg = str_replace('<!--RFAT_BEDIENUNG-->', RFAT_BEDIENUNG_ABSATZ, $dsg);
 
         $pages = array(
             'termin-buchen' => array('Termin buchen',
@@ -6785,4 +8142,726 @@ if (!function_exists('rc_build_slots')) {
         update_option('rc_setup_version', '4');
     }, 20);
 
+}
+
+/* =========================================================================
+ * WOERTERBUCH
+ *
+ * Deutsch steht nicht in dieser Tabelle. Es steht als zweites Argument an
+ * jedem rfat_t()-Aufruf, dort, wo der Text ausgegeben wird — siehe
+ * MEHRSPRACHIGKEIT oben. Hier stehen nur die Fassungen daneben.
+ *
+ * Das hat einen praktischen Grund: Wer einen deutschen Satz aendert, muss
+ * hier nichts nachziehen. Der uebersetzte bleibt stehen, bis ihn jemand
+ * anfasst — bei einer Kommaverschiebung ist das richtig, bei einer
+ * inhaltlichen Aenderung faellt es beim Lesen auf, weil beide Fassungen
+ * unter demselben Schluessel stehen.
+ *
+ * Fehlt ein Schluessel, erscheint der deutsche Satz. Nie ein leeres Feld
+ * und nie ein nackter Schluessel — eine halb uebersetzte Seite ist
+ * unschoen, eine leere ist kaputt.
+ *
+ * Welche Sprachen und warum: Deutsch, Englisch, Tuerkisch, Arabisch,
+ * Ukrainisch. Das sind, neben Deutsch, die Sprachen, die einem in
+ * Frankfurt in einer offenen Werkstatt am haeufigsten begegnen. Eine
+ * weitere Sprache ist ein weiterer Eintrag in rfat_sprachen() und ein
+ * weiterer Block hier — sonst nichts.
+ *
+ * NICHT uebersetzt: Impressum und Datenschutz. Beide sind rechtlich
+ * verbindliche Texte; eine Uebersetzung daneben waere eine zweite
+ * Fassung, die im Zweifel etwas anderes sagt. Das Bedienfeld sagt das
+ * ausdruecklich dazu (ui.uebersetzung_hinweis).
+ *
+ * Auch nicht uebersetzt: der Verwaltungsbereich. Ihn sieht nur das Team.
+ * ========================================================================= */
+function rfat_woerterbuch() {
+    static $buch = null;
+    if ($buch !== null) {
+        return $buch;
+    }
+
+    $buch = [
+
+    /* ---------------------------------------------------------------- */
+    'en' => [
+        'tipp.text' => 'This page is also available in English.',
+        'tipp.ja'   => 'Switch to English',
+        'tipp.nein' => 'No, thanks',
+
+        'ui.bedienung'            => 'Language and display',
+        'ui.sprache'              => 'Language',
+        'ui.ansicht'              => 'Display',
+        'ui.ansicht_auto'         => 'Automatic',
+        'ui.ansicht_hell'         => 'Light',
+        'ui.ansicht_dunkel'       => 'Dark',
+        'ui.ansicht_kontrast'     => 'High contrast',
+        'ui.schrift'              => 'Text size',
+        'ui.schrift_normal'       => 'Normal',
+        'ui.schrift_gross'        => 'Larger',
+        'ui.schrift_sehr_gross'   => 'Largest',
+        'ui.bedienung_hinweis'    => 'Your choice stays on this device – saved in your browser, not with us.',
+        'ui.uebersetzung_hinweis' => 'The legal notice and privacy policy are in German only – they are the legally binding versions.',
+        'ui.menue_oeffnen'        => 'Open menu',
+        'ui.menue_schliessen'     => 'Close menu',
+        'ui.hauptmenue'           => 'Main menu',
+
+        'menue.start'       => 'Home',
+        'menue.buchen'      => 'Book an appointment',
+        'menue.abrufen'     => 'Find my appointment',
+        'menue.termine_ort' => 'Dates & venue',
+        'menue.mitmachen'   => 'Join in',
+        'menue.impressum'   => 'Legal notice',
+        'menue.datenschutz' => 'Privacy',
+
+        'datum.wochentage' => ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+        'datum.uhrzeit'    => '%s',
+        'datum.format'     => '%1$s, %2$s',
+
+        'buchen.schritt_was'        => 'What',
+        'buchen.schritt_wann'       => 'When',
+        'buchen.schritt_abschicken' => 'Send',
+        'buchen.schritt_von'        => 'Step %1$d of %2$d',
+        'buchen.was_frage'          => 'What would you like to repair?',
+        'buchen.keine_kategorien'   => 'We are not taking appointments at the moment. Please check back in a few days.',
+        'buchen.zurueck_kategorie'  => 'another category',
+        'buchen.wann_frage'         => 'Pick a free slot',
+        'buchen.keine_termine'      => 'No slots are free at the moment. Please check back in a few days.',
+        'buchen.vergeben'           => 'already taken',
+        'buchen.zurueck_termin'     => 'another slot',
+        'buchen.abschicken_kopf'    => 'Send your request',
+        'buchen.was_kaputt'         => 'What is broken?',
+        'buchen.freiwillig'         => 'optional',
+        'buchen.beispiel'           => 'e.g. "phone battery does not last" or "e-bike brake is rubbing"',
+        'buchen.absenden'           => 'Request this slot',
+        'buchen.hinweis'            => 'Not confirmed yet — we will look at your request and get back to you.',
+
+        'fehler.nonce'     => 'The security check failed. This usually happens when the page has been open for a long time. Please pick the slot again.',
+        'fehler.weg'       => 'This slot no longer exists. Please choose another one.',
+        'fehler.belegt'    => 'This slot has just been taken. Please choose another one.',
+        'fehler.speichern' => 'Saving did not work. Please try again.',
+        'fehler.zuviel'    => 'This connection already has %d appointments booked – that is the limit, so that there is something left for everyone. '
+                              . 'If you cancel one of them under "Find my appointment", a place is free again straight away. '
+                              . 'If you really do need more appointments, just drop us an e-mail.',
+        'fehler.zuschnell' => 'That came in very quickly one after the other. Please wait a moment and send the request again.',
+
+        'feld.note' => 'Description of the problem',
+        'feld.cat'  => 'Area',
+        'feld.date' => 'Date',
+        'feld.time' => 'Time',
+        'feld.code' => 'Booking code',
+
+        'status.angefragt'  => 'Requested',
+        'status.bestaetigt' => 'Confirmed',
+        'status.offen'      => 'Open',
+        'status.erledigt'   => 'Done',
+        'status.storniert'  => 'Cancelled',
+
+        'abruf.nicht_verfuegbar'  => 'Appointment management is currently unavailable.',
+        'abruf.vorgemerkt_kopf'   => 'Appointment noted.',
+        'abruf.vorgemerkt_text'   => 'We will look at it and get back to you.',
+        'abruf.storniert'         => 'Your appointment has been cancelled. The slot is free for other people again.',
+        'abruf.code_weg'          => 'This code was not found (it may already have been cancelled).',
+        'abruf.code_unbekannt'    => 'This code was not found.',
+        'abruf.sicherheit'        => 'Security check failed, please try again.',
+        'abruf.neuer_code_weg'    => 'The new code was not found. Have you finished booking the new appointment?',
+        'abruf.alter_code'        => 'That is still your old code. Please book a new appointment below first.',
+        'abruf.verschoben'        => 'Done! Your old appointment has been cancelled, your new appointment (code %s) stands.',
+        'abruf.abgemeldet'        => 'Done. No e-mail address is stored for this code any more. Your appointment stands unchanged.',
+        'abruf.mail_ungueltig'    => 'That does not look like a valid e-mail address.',
+        'abruf.nichts_gespeichert' => 'Nothing was saved.',
+        'abruf.kontakt_geloescht' => 'No contact details are stored for your appointment any more. Your appointment stands.',
+        'abruf.signal_link'       => 'Signal link',
+        'abruf.signal_name'       => 'Signal username',
+        'abruf.email_adresse'     => 'e-mail address',
+        'abruf.und'               => '%1$s and %2$s',
+        'abruf.gespeichert'       => 'Saved: %s.',
+        'abruf.bleibt_gespeichert' => 'Your details will stay until you delete them here.',
+        'abruf.wird_geloescht'    => 'Your details will be deleted automatically after the appointment.',
+        'abruf.leer'              => 'There was nothing in there yet.',
+        'abruf.danke_antwort'     => 'Thank you! We have your answer.',
+        'abruf.notiert'           => 'Noted — we have added it to your appointment.',
+        'abruf.nicht_gefunden'    => 'No appointment found for this code. Please check the spelling (e.g. RC-AB12C).',
+
+        'abruf.abmelden_kopf'  => 'E-mail notification',
+        'abruf.abmelden_frage' => 'Delete the address for %s?',
+        'abruf.abmelden_text'  => 'We will then remove the stored e-mail address. You will not get any more messages. Your appointment stands – nothing is cancelled by this.',
+        'abruf.abmelden_ja'    => 'Yes, delete the address',
+        'abruf.abmelden_nein'  => 'No, back to my appointment',
+
+        'abruf.dein_code'       => 'Your booking code',
+        'abruf.termin_anzeigen' => 'Show appointment',
+        'abruf.dein_termin'     => 'Your appointment',
+        'abruf.termin_unbekannt' => 'Date unknown',
+        'abruf.kategorie'       => 'Category',
+
+        'abruf.frage_an_dich'   => 'A question for you',
+        'abruf.deine_antwort'   => 'Your answer',
+        'abruf.antwort_senden'  => 'Send answer',
+        'abruf.bisher'          => 'What we have discussed',
+        'abruf.du'              => 'You',
+        'abruf.wir'             => 'Us',
+        'abruf.nachtragen'      => 'Anything to add?',
+        'abruf.nachtragen_hilfe' => 'For example what exactly is broken, or what you are bringing along. We will see it before your appointment.',
+        'abruf.deine_notiz'     => 'Your note',
+        'abruf.absenden'        => 'Send',
+
+        'abruf.link_label' => 'Your code %s — here it is as a link:',
+        'abruf.kopieren'   => 'Copy',
+        'abruf.kopiert'    => 'Copied ✓',
+        'abruf.gemerkt'    => 'This device remembers the appointment — next time it will be shown up here. ',
+        'abruf.nicht_merken' => 'do not remember',
+        'abruf.vergessen'  => 'Fine, this device will not remember anything. Please keep your code safe.',
+        'abruf.meine_termine' => 'Your appointments on this device',
+        'abruf.mein_termin'   => 'Your appointment on this device',
+        'abruf.code_anzeigen' => 'show %s',
+        'abruf.anderer_code'  => 'Or enter a different code below. ',
+        'abruf.gemerkte_loeschen' => 'delete remembered appointments',
+
+        'abruf.offen_kopf' => 'Not confirmed yet.',
+        'abruf.offen_text' => 'We will look at your request and get back to you.',
+
+        'abruf.kontakt_kopf'   => 'How we can reach you',
+        'abruf.kontakt_intro'  => 'Optional – nothing changes if you leave this empty. We use it to get in touch when something needs clarifying or when your appointment is confirmed.',
+        'abruf.email'          => 'E-mail',
+        'abruf.signal_feld'    => 'Signal link or username',
+        'abruf.signal_hinweis' => 'The Signal link works best (in Signal: Settings → Profile → Username → Copy link). '
+                                  . 'A username works too. We do not need your phone number.',
+        'abruf.keep'           => 'Keep this stored after the appointment as well.',
+        'abruf.keep_zusatz'    => 'Without this tick your details are deleted afterwards.',
+        'abruf.aendern_speichern' => 'Save change',
+        'abruf.kontakt_speichern' => 'Save contact',
+        'abruf.gespeichert_kopf'  => 'Saved:',
+        'abruf.und_wort'          => 'and',
+        'abruf.dein_link'         => 'your link',
+        'abruf.bleibt_bis'        => 'stays stored until you delete it',
+        'abruf.nach_termin_weg'   => 'will be deleted after the appointment',
+        'abruf.loeschen_hinweis'  => 'To delete, simply clear the relevant field and save.',
+
+        'abruf.kalender'          => 'Add to calendar',
+        'abruf.verschieben'       => 'Move appointment',
+        'abruf.stornieren'        => 'Cancel appointment',
+        'abruf.stornieren_frage'  => 'Really cancel this appointment?',
+        'abruf.verschieben_kopf'  => 'How to move your appointment:',
+        'abruf.verschieben_1'     => 'Book a new appointment below in the usual way – you will get a new code.',
+        'abruf.verschieben_2'     => 'Then enter the new code here. We will automatically cancel your old appointment (%s).',
+        'abruf.neuer_code'        => 'Your new booking code',
+        'abruf.alten_stornieren'  => 'Cancel the old appointment now',
+    ],
+
+    /* ---------------------------------------------------------------- */
+    'tr' => [
+        'tipp.text' => 'Bu sayfa Türkçe olarak da mevcut.',
+        'tipp.ja'   => 'Türkçeye geç',
+        'tipp.nein' => 'Hayır, teşekkürler',
+
+        'ui.bedienung'            => 'Dil ve görünüm',
+        'ui.sprache'              => 'Dil',
+        'ui.ansicht'              => 'Görünüm',
+        'ui.ansicht_auto'         => 'Otomatik',
+        'ui.ansicht_hell'         => 'Açık',
+        'ui.ansicht_dunkel'       => 'Koyu',
+        'ui.ansicht_kontrast'     => 'Yüksek kontrast',
+        'ui.schrift'              => 'Yazı boyutu',
+        'ui.schrift_normal'       => 'Normal',
+        'ui.schrift_gross'        => 'Daha büyük',
+        'ui.schrift_sehr_gross'   => 'En büyük',
+        'ui.bedienung_hinweis'    => 'Seçimin yalnızca bu cihazda kalır – tarayıcında saklanır, bizde değil.',
+        'ui.uebersetzung_hinweis' => 'Künye ve gizlilik metni yalnızca Almanca – hukuken bağlayıcı olan bu metinlerdir.',
+        'ui.menue_oeffnen'        => 'Menüyü aç',
+        'ui.menue_schliessen'     => 'Menüyü kapat',
+        'ui.hauptmenue'           => 'Ana menü',
+
+        'menue.start'       => 'Ana sayfa',
+        'menue.buchen'      => 'Randevu al',
+        'menue.abrufen'     => 'Randevumu göster',
+        'menue.termine_ort' => 'Tarihler ve yer',
+        'menue.mitmachen'   => 'Katıl',
+        'menue.impressum'   => 'Künye',
+        'menue.datenschutz' => 'Gizlilik',
+
+        'datum.wochentage' => ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'],
+        'datum.uhrzeit'    => 'saat %s',
+        'datum.format'     => '%1$s, %2$s',
+
+        'buchen.schritt_was'        => 'Ne',
+        'buchen.schritt_wann'       => 'Ne zaman',
+        'buchen.schritt_abschicken' => 'Gönder',
+        'buchen.schritt_von'        => 'Adım %1$d / %2$d',
+        'buchen.was_frage'          => 'Neyi tamir ettirmek istiyorsun?',
+        'buchen.keine_kategorien'   => 'Şu anda randevu almıyoruz. Birkaç gün sonra tekrar bak.',
+        'buchen.zurueck_kategorie'  => 'başka kategori',
+        'buchen.wann_frage'         => 'Boş bir randevu seç',
+        'buchen.keine_termine'      => 'Şu anda boş randevu yok. Birkaç gün sonra tekrar bak.',
+        'buchen.vergeben'           => 'dolu',
+        'buchen.zurueck_termin'     => 'başka randevu',
+        'buchen.abschicken_kopf'    => 'Talebini gönder',
+        'buchen.was_kaputt'         => 'Ne bozuk?',
+        'buchen.freiwillig'         => 'isteğe bağlı',
+        'buchen.beispiel'           => 'ör. "telefon bataryası çabuk bitiyor" veya "elektrikli bisikletin freni sürtüyor"',
+        'buchen.absenden'           => 'Randevu talep et',
+        'buchen.hinweis'            => 'Henüz onaylanmadı — talebine bakıp sana döneceğiz.',
+
+        'fehler.nonce'     => 'Güvenlik kontrolü başarısız oldu. Bu genellikle sayfa uzun süre açık kaldığında olur. Lütfen randevuyu tekrar seç.',
+        'fehler.weg'       => 'Bu randevu artık yok. Lütfen başka birini seç.',
+        'fehler.belegt'    => 'Bu randevu az önce alındı. Lütfen başka birini seç.',
+        'fehler.speichern' => 'Kaydetme işlemi olmadı. Lütfen tekrar dene.',
+        'fehler.zuviel'    => 'Bu bağlantıdan zaten %d randevu alınmış – aynı anda daha fazlası mümkün değil, ki herkese bir şey kalsın. '
+                              . 'Bunlardan birini "Randevumu göster" altında iptal edersen hemen bir yer açılır. '
+                              . 'Gerçekten daha fazla randevuya ihtiyacın varsa bize kısa bir e-posta yaz.',
+        'fehler.zuschnell' => 'Bu çok hızlı arka arkaya geldi. Lütfen biraz bekle ve talebi tekrar gönder.',
+
+        'feld.note' => 'Sorunun açıklaması',
+        'feld.cat'  => 'Alan',
+        'feld.date' => 'Tarih',
+        'feld.time' => 'Saat',
+        'feld.code' => 'Randevu kodu',
+
+        'status.angefragt'  => 'Talep edildi',
+        'status.bestaetigt' => 'Onaylandı',
+        'status.offen'      => 'Açık',
+        'status.erledigt'   => 'Tamamlandı',
+        'status.storniert'  => 'İptal edildi',
+
+        'abruf.nicht_verfuegbar'  => 'Randevu yönetimi şu anda kullanılamıyor.',
+        'abruf.vorgemerkt_kopf'   => 'Randevu kaydedildi.',
+        'abruf.vorgemerkt_text'   => 'Bakıp sana döneceğiz.',
+        'abruf.storniert'         => 'Randevun iptal edildi. Yer başkaları için tekrar boş.',
+        'abruf.code_weg'          => 'Bu kod bulunamadı (belki zaten iptal edilmiştir).',
+        'abruf.code_unbekannt'    => 'Bu kod bulunamadı.',
+        'abruf.sicherheit'        => 'Güvenlik kontrolü başarısız oldu, lütfen tekrar dene.',
+        'abruf.neuer_code_weg'    => 'Yeni kod bulunamadı. Yeni randevuyu almayı bitirdin mi?',
+        'abruf.alter_code'        => 'Bu hâlâ eski kodun. Lütfen önce aşağıdan yeni bir randevu al.',
+        'abruf.verschoben'        => 'Tamam! Eski randevun iptal edildi, yeni randevun (kod %s) geçerli.',
+        'abruf.abgemeldet'        => 'Tamam. Bu koda ait e-posta adresi artık kayıtlı değil. Randevun değişmeden duruyor.',
+        'abruf.mail_ungueltig'    => 'Bu geçerli bir e-posta adresine benzemiyor.',
+        'abruf.nichts_gespeichert' => 'Hiçbir şey kaydedilmedi.',
+        'abruf.kontakt_geloescht' => 'Randevuna ait iletişim bilgisi artık kayıtlı değil. Randevun duruyor.',
+        'abruf.signal_link'       => 'Signal bağlantısı',
+        'abruf.signal_name'       => 'Signal kullanıcı adı',
+        'abruf.email_adresse'     => 'e-posta adresi',
+        'abruf.und'               => '%1$s ve %2$s',
+        'abruf.gespeichert'       => 'Kaydedildi: %s.',
+        'abruf.bleibt_gespeichert' => 'Bilgilerin, sen buradan silene kadar kayıtlı kalır.',
+        'abruf.wird_geloescht'    => 'Bilgilerin randevudan sonra otomatik olarak silinir.',
+        'abruf.leer'              => 'İçinde henüz bir şey yoktu.',
+        'abruf.danke_antwort'     => 'Teşekkürler! Cevabın bize ulaştı.',
+        'abruf.notiert'           => 'Not aldık — randevuna ekledik.',
+        'abruf.nicht_gefunden'    => 'Bu koda ait randevu bulunamadı. Lütfen yazımı kontrol et (ör. RC-AB12C).',
+
+        'abruf.abmelden_kopf'  => 'E-posta bildirimi',
+        'abruf.abmelden_frage' => '%s için adres silinsin mi?',
+        'abruf.abmelden_text'  => 'Kayıtlı e-posta adresini kaldırırız. Artık mesaj almazsın. Randevun duruyor – bununla hiçbir şey iptal edilmez.',
+        'abruf.abmelden_ja'    => 'Evet, adresi sil',
+        'abruf.abmelden_nein'  => 'Hayır, randevuma geri dön',
+
+        'abruf.dein_code'        => 'Randevu kodun',
+        'abruf.termin_anzeigen'  => 'Randevuyu göster',
+        'abruf.dein_termin'      => 'Randevun',
+        'abruf.termin_unbekannt' => 'Tarih bilinmiyor',
+        'abruf.kategorie'        => 'Kategori',
+
+        'abruf.frage_an_dich'    => 'Sana bir soru',
+        'abruf.deine_antwort'    => 'Cevabın',
+        'abruf.antwort_senden'   => 'Cevabı gönder',
+        'abruf.bisher'           => 'Şimdiye kadar konuşulanlar',
+        'abruf.du'               => 'Sen',
+        'abruf.wir'              => 'Biz',
+        'abruf.nachtragen'       => 'Eklemek istediğin bir şey var mı?',
+        'abruf.nachtragen_hilfe' => 'Örneğin tam olarak neyin bozuk olduğu ya da yanında ne getireceğin. Randevundan önce görürüz.',
+        'abruf.deine_notiz'      => 'Notun',
+        'abruf.absenden'         => 'Gönder',
+
+        'abruf.link_label'        => 'Kodun %s — bağlantı olarak:',
+        'abruf.kopieren'          => 'Kopyala',
+        'abruf.kopiert'           => 'Kopyalandı ✓',
+        'abruf.gemerkt'           => 'Bu cihaz randevuyu hatırlıyor — bir dahaki gelişinde burada yukarıda görünecek. ',
+        'abruf.nicht_merken'      => 'hatırlama',
+        'abruf.vergessen'         => 'Tamam, bu cihaz artık hiçbir şey hatırlamıyor. Kodunu iyi sakla.',
+        'abruf.meine_termine'     => 'Bu cihazdaki randevuların',
+        'abruf.mein_termin'       => 'Bu cihazdaki randevun',
+        'abruf.code_anzeigen'     => '%s göster',
+        'abruf.anderer_code'      => 'Ya da aşağıya başka bir kod gir. ',
+        'abruf.gemerkte_loeschen' => 'hatırlanan randevuları sil',
+
+        'abruf.offen_kopf' => 'Henüz onaylanmadı.',
+        'abruf.offen_text' => 'Talebine bakıp sana döneceğiz.',
+
+        'abruf.kontakt_kopf'   => 'Sana nasıl ulaşalım',
+        'abruf.kontakt_intro'  => 'İsteğe bağlı – boş bırakırsan bir şey değişmez. Bir şeyin açıklığa kavuşması gerektiğinde ya da randevun onaylandığında bununla sana ulaşırız.',
+        'abruf.email'          => 'E-posta',
+        'abruf.signal_feld'    => 'Signal bağlantısı veya kullanıcı adı',
+        'abruf.signal_hinweis' => 'En iyisi Signal bağlantısı (Signal içinde: Ayarlar → Profil → Kullanıcı adı → Bağlantıyı kopyala). '
+                                  . 'Kullanıcı adı da olur. Telefon numarana ihtiyacımız yok.',
+        'abruf.keep'           => 'Randevudan sonra da kayıtlı kalsın.',
+        'abruf.keep_zusatz'    => 'İşaretlemezsen bilgiler sonrasında silinir.',
+        'abruf.aendern_speichern' => 'Değişikliği kaydet',
+        'abruf.kontakt_speichern' => 'İletişimi kaydet',
+        'abruf.gespeichert_kopf'  => 'Kayıtlı:',
+        'abruf.und_wort'          => 've',
+        'abruf.dein_link'         => 'bağlantın',
+        'abruf.bleibt_bis'        => 'sen silene kadar kayıtlı kalır',
+        'abruf.nach_termin_weg'   => 'randevudan sonra silinir',
+        'abruf.loeschen_hinweis'  => 'Silmek için ilgili alanı boşalt ve kaydet.',
+
+        'abruf.kalender'         => 'Takvime ekle',
+        'abruf.verschieben'      => 'Randevuyu değiştir',
+        'abruf.stornieren'       => 'Randevuyu iptal et',
+        'abruf.stornieren_frage' => 'Bu randevu gerçekten iptal edilsin mi?',
+        'abruf.verschieben_kopf' => 'Randevunu şöyle değiştirirsin:',
+        'abruf.verschieben_1'    => 'Aşağıdan normal yoldan yeni bir randevu al – yeni bir kod alırsın.',
+        'abruf.verschieben_2'    => 'Sonra yeni kodu buraya gir. Eski randevunu (%s) otomatik olarak iptal ederiz.',
+        'abruf.neuer_code'       => 'Yeni randevu kodun',
+        'abruf.alten_stornieren' => 'Eski randevuyu şimdi iptal et',
+    ],
+
+    /* ----------------------------------------------------------------
+     * Arabisch. Die Seite dreht sich dafuer (dir="rtl", siehe
+     * MEHRSPRACHIGKEIT) — die Texte hier stehen ganz normal, das Drehen
+     * ist Sache des Browsers.
+     *
+     * Der Buchungscode („RC-AB12C") und die Zahlen bleiben in beiden
+     * Richtungen gleich: Er steht so in der Mail, im Kalendereintrag und
+     * auf dem Zettel, den jemand mitbringt. --------------------------- */
+    'ar' => [
+        'tipp.text' => 'هذه الصفحة متاحة أيضًا بالعربية.',
+        'tipp.ja'   => 'التحويل إلى العربية',
+        'tipp.nein' => 'لا، شكرًا',
+
+        'ui.bedienung'            => 'اللغة والعرض',
+        'ui.sprache'              => 'اللغة',
+        'ui.ansicht'              => 'العرض',
+        'ui.ansicht_auto'         => 'تلقائي',
+        'ui.ansicht_hell'         => 'فاتح',
+        'ui.ansicht_dunkel'       => 'داكن',
+        'ui.ansicht_kontrast'     => 'تباين عالٍ',
+        'ui.schrift'              => 'حجم الخط',
+        'ui.schrift_normal'       => 'عادي',
+        'ui.schrift_gross'        => 'أكبر',
+        'ui.schrift_sehr_gross'   => 'الأكبر',
+        'ui.bedienung_hinweis'    => 'يبقى اختيارك على هذا الجهاز فقط – محفوظ في متصفحك، وليس لدينا.',
+        'ui.uebersetzung_hinweis' => 'بيانات الناشر وسياسة الخصوصية بالألمانية فقط – فهي النصوص الملزمة قانونًا.',
+        'ui.menue_oeffnen'        => 'فتح القائمة',
+        'ui.menue_schliessen'     => 'إغلاق القائمة',
+        'ui.hauptmenue'           => 'القائمة الرئيسية',
+
+        'menue.start'       => 'الصفحة الرئيسية',
+        'menue.buchen'      => 'حجز موعد',
+        'menue.abrufen'     => 'عرض موعدي',
+        'menue.termine_ort' => 'المواعيد والمكان',
+        'menue.mitmachen'   => 'شارك معنا',
+        'menue.impressum'   => 'بيانات الناشر',
+        'menue.datenschutz' => 'الخصوصية',
+
+        'datum.wochentage' => ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'],
+        'datum.uhrzeit'    => 'الساعة %s',
+        'datum.format'     => '%1$s، %2$s',
+
+        'buchen.schritt_was'        => 'ماذا',
+        'buchen.schritt_wann'       => 'متى',
+        'buchen.schritt_abschicken' => 'إرسال',
+        'buchen.schritt_von'        => 'الخطوة %1$d من %2$d',
+        'buchen.was_frage'          => 'ما الذي تريد إصلاحه؟',
+        'buchen.keine_kategorien'   => 'لا نستقبل مواعيد في الوقت الحالي. تفقّد الصفحة بعد بضعة أيام.',
+        'buchen.zurueck_kategorie'  => 'فئة أخرى',
+        'buchen.wann_frage'         => 'اختر موعدًا متاحًا',
+        'buchen.keine_termine'      => 'لا توجد مواعيد متاحة حاليًا. تفقّد الصفحة بعد بضعة أيام.',
+        'buchen.vergeben'           => 'محجوز',
+        'buchen.zurueck_termin'     => 'موعد آخر',
+        'buchen.abschicken_kopf'    => 'إرسال الطلب',
+        'buchen.was_kaputt'         => 'ما العطل؟',
+        'buchen.freiwillig'         => 'اختياري',
+        'buchen.beispiel'           => 'مثلاً: «بطارية الهاتف لا تدوم» أو «فرامل الدراجة الكهربائية تحتكّ»',
+        'buchen.absenden'           => 'طلب الموعد',
+        'buchen.hinweis'            => 'لم يُؤكَّد بعد — سننظر في طلبك ونعود إليك.',
+
+        'fehler.nonce'     => 'فشل التحقق الأمني. يحدث هذا عادةً عندما تبقى الصفحة مفتوحة وقتًا طويلاً. الرجاء اختيار الموعد من جديد.',
+        'fehler.weg'       => 'هذا الموعد لم يعد متاحًا. الرجاء اختيار موعد آخر.',
+        'fehler.belegt'    => 'تم حجز هذا الموعد للتو. الرجاء اختيار موعد آخر.',
+        'fehler.speichern' => 'لم يتم الحفظ. الرجاء المحاولة مرة أخرى.',
+        /* Aus demselben Grund wie im Ukrainischen: Im Arabischen haengt
+         * die Form von „موعد" an der Zahl (3 مواعيد, 11 موعدًا). */
+        'fehler.zuviel'    => 'عدد المواعيد المحجوزة من هذا الاتصال: %d – وهذا هو الحد الأقصى في الوقت نفسه، كي يبقى شيء للجميع. '
+                              . 'إذا ألغيت أحدها من «عرض موعدي» يتحرّر مكان فورًا. '
+                              . 'وإذا كنت تحتاج فعلاً إلى مواعيد أكثر، اكتب لنا رسالة قصيرة بالبريد الإلكتروني.',
+        'fehler.zuschnell' => 'جاء ذلك بسرعة كبيرة واحدًا تلو الآخر. انتظر لحظة ثم أرسل الطلب مرة أخرى.',
+
+        'feld.note' => 'وصف المشكلة',
+        'feld.cat'  => 'المجال',
+        'feld.date' => 'التاريخ',
+        'feld.time' => 'الوقت',
+        'feld.code' => 'رمز الحجز',
+
+        'status.angefragt'  => 'مطلوب',
+        'status.bestaetigt' => 'مؤكَّد',
+        'status.offen'      => 'مفتوح',
+        'status.erledigt'   => 'منجز',
+        'status.storniert'  => 'ملغى',
+
+        'abruf.nicht_verfuegbar'  => 'إدارة المواعيد غير متاحة حاليًا.',
+        'abruf.vorgemerkt_kopf'   => 'تم تسجيل الموعد.',
+        'abruf.vorgemerkt_text'   => 'سننظر فيه ونعود إليك.',
+        'abruf.storniert'         => 'تم إلغاء موعدك. أصبح المكان متاحًا لغيرك من جديد.',
+        'abruf.code_weg'          => 'لم يُعثر على هذا الرمز (ربما أُلغي من قبل).',
+        'abruf.code_unbekannt'    => 'لم يُعثر على هذا الرمز.',
+        'abruf.sicherheit'        => 'فشل التحقق الأمني، الرجاء المحاولة مرة أخرى.',
+        'abruf.neuer_code_weg'    => 'لم يُعثر على الرمز الجديد. هل أنهيت حجز الموعد الجديد؟',
+        'abruf.alter_code'        => 'هذا ما زال رمزك القديم. احجز أولاً موعدًا جديدًا في الأسفل.',
+        'abruf.verschoben'        => 'تم! أُلغي موعدك القديم، وموعدك الجديد (الرمز %s) قائم.',
+        'abruf.abgemeldet'        => 'تم. لم يعد هناك بريد إلكتروني محفوظ لهذا الرمز. موعدك قائم دون تغيير.',
+        'abruf.mail_ungueltig'    => 'لا يبدو هذا عنوان بريد إلكتروني صحيحًا.',
+        'abruf.nichts_gespeichert' => 'لم يُحفظ شيء.',
+        'abruf.kontakt_geloescht' => 'لم تعد هناك بيانات تواصل محفوظة مع موعدك. موعدك قائم.',
+        'abruf.signal_link'       => 'رابط Signal',
+        'abruf.signal_name'       => 'اسم المستخدم في Signal',
+        'abruf.email_adresse'     => 'عنوان البريد الإلكتروني',
+        'abruf.und'               => '%1$s و%2$s',
+        'abruf.gespeichert'       => 'تم الحفظ: %s.',
+        'abruf.bleibt_gespeichert' => 'تبقى بياناتك محفوظة إلى أن تحذفها هنا بنفسك.',
+        'abruf.wird_geloescht'    => 'تُحذف بياناتك تلقائيًا بعد الموعد.',
+        'abruf.leer'              => 'لم يكن هناك شيء مكتوب بعد.',
+        'abruf.danke_antwort'     => 'شكرًا! وصلنا ردّك.',
+        'abruf.notiert'           => 'سجّلناه — أضفناه إلى موعدك.',
+        'abruf.nicht_gefunden'    => 'لم يُعثر على موعد بهذا الرمز. تحقّق من الكتابة (مثلاً RC-AB12C).',
+
+        'abruf.abmelden_kopf'  => 'إشعار بالبريد الإلكتروني',
+        'abruf.abmelden_frage' => 'حذف العنوان الخاص بـ %s؟',
+        'abruf.abmelden_text'  => 'سنزيل عندها عنوان البريد المحفوظ. لن تصلك رسائل بعد ذلك. موعدك يبقى قائمًا – لا يُلغى شيء بهذا.',
+        'abruf.abmelden_ja'    => 'نعم، احذف العنوان',
+        'abruf.abmelden_nein'  => 'لا، العودة إلى موعدي',
+
+        'abruf.dein_code'        => 'رمز الحجز الخاص بك',
+        'abruf.termin_anzeigen'  => 'عرض الموعد',
+        'abruf.dein_termin'      => 'موعدك',
+        'abruf.termin_unbekannt' => 'التاريخ غير معروف',
+        'abruf.kategorie'        => 'الفئة',
+
+        'abruf.frage_an_dich'    => 'سؤال لك',
+        'abruf.deine_antwort'    => 'ردّك',
+        'abruf.antwort_senden'   => 'إرسال الرد',
+        'abruf.bisher'           => 'ما جرى الحديث عنه',
+        'abruf.du'               => 'أنت',
+        'abruf.wir'              => 'نحن',
+        'abruf.nachtragen'       => 'هل تريد إضافة شيء؟',
+        'abruf.nachtragen_hilfe' => 'مثلاً ما هو العطل بالضبط أو ما الذي ستحضره معك. سنراه قبل موعدك.',
+        'abruf.deine_notiz'      => 'ملاحظتك',
+        'abruf.absenden'         => 'إرسال',
+
+        'abruf.link_label'        => 'رمزك %s — وهذا هو كرابط:',
+        'abruf.kopieren'          => 'نسخ',
+        'abruf.kopiert'           => 'تم النسخ ✓',
+        'abruf.gemerkt'           => 'يحفظ هذا الجهاز الموعد — وسيظهر هنا في الأعلى عند زيارتك القادمة. ',
+        'abruf.nicht_merken'      => 'عدم الحفظ',
+        'abruf.vergessen'         => 'حسنًا، لم يعد هذا الجهاز يحفظ شيئًا. احتفظ برمزك جيدًا.',
+        'abruf.meine_termine'     => 'مواعيدك على هذا الجهاز',
+        'abruf.mein_termin'       => 'موعدك على هذا الجهاز',
+        'abruf.code_anzeigen'     => 'عرض %s',
+        'abruf.anderer_code'      => 'أو أدخل رمزًا آخر في الأسفل. ',
+        'abruf.gemerkte_loeschen' => 'حذف المواعيد المحفوظة',
+
+        'abruf.offen_kopf' => 'لم يُؤكَّد بعد.',
+        'abruf.offen_text' => 'سننظر في طلبك ونعود إليك.',
+
+        'abruf.kontakt_kopf'   => 'كيف نصل إليك',
+        'abruf.kontakt_intro'  => 'اختياري – لا يتغير شيء إن تركته فارغًا. نستخدمه للتواصل معك إذا احتاج أمر إلى توضيح أو عند تأكيد موعدك.',
+        'abruf.email'          => 'البريد الإلكتروني',
+        'abruf.signal_feld'    => 'رابط Signal أو اسم المستخدم',
+        'abruf.signal_hinweis' => 'الأفضل هو رابط Signal (داخل Signal: الإعدادات ← الملف الشخصي ← اسم المستخدم ← نسخ الرابط). '
+                                  . 'واسم المستخدم يفي بالغرض أيضًا. لا نحتاج إلى رقم هاتفك.',
+        'abruf.keep'           => 'الاحتفاظ بها محفوظة بعد الموعد أيضًا.',
+        'abruf.keep_zusatz'    => 'من دون هذه العلامة تُحذف البيانات بعد الموعد.',
+        'abruf.aendern_speichern' => 'حفظ التغيير',
+        'abruf.kontakt_speichern' => 'حفظ بيانات التواصل',
+        'abruf.gespeichert_kopf'  => 'محفوظ:',
+        'abruf.und_wort'          => 'و',
+        'abruf.dein_link'         => 'رابطك',
+        'abruf.bleibt_bis'        => 'يبقى محفوظًا إلى أن تحذفه',
+        'abruf.nach_termin_weg'   => 'يُحذف بعد الموعد',
+        'abruf.loeschen_hinweis'  => 'للحذف، أفرغ الحقل المعني ثم احفظ.',
+
+        'abruf.kalender'         => 'إضافة إلى التقويم',
+        'abruf.verschieben'      => 'تغيير الموعد',
+        'abruf.stornieren'       => 'إلغاء الموعد',
+        'abruf.stornieren_frage' => 'هل تريد فعلاً إلغاء هذا الموعد؟',
+        'abruf.verschieben_kopf' => 'هكذا تغيّر موعدك:',
+        'abruf.verschieben_1'    => 'احجز في الأسفل موعدًا جديدًا بالطريقة المعتادة – ستحصل على رمز جديد.',
+        'abruf.verschieben_2'    => 'ثم أدخل الرمز الجديد هنا. سنلغي موعدك القديم (%s) تلقائيًا.',
+        'abruf.neuer_code'       => 'رمز الحجز الجديد',
+        'abruf.alten_stornieren' => 'إلغاء الموعد القديم الآن',
+    ],
+
+    /* ---------------------------------------------------------------- */
+    'uk' => [
+        'tipp.text' => 'Ця сторінка доступна також українською.',
+        'tipp.ja'   => 'Перейти на українську',
+        'tipp.nein' => 'Ні, дякую',
+
+        'ui.bedienung'            => 'Мова та вигляд',
+        'ui.sprache'              => 'Мова',
+        'ui.ansicht'              => 'Вигляд',
+        'ui.ansicht_auto'         => 'Автоматично',
+        'ui.ansicht_hell'         => 'Світлий',
+        'ui.ansicht_dunkel'       => 'Темний',
+        'ui.ansicht_kontrast'     => 'Високий контраст',
+        'ui.schrift'              => 'Розмір шрифту',
+        'ui.schrift_normal'       => 'Звичайний',
+        'ui.schrift_gross'        => 'Більший',
+        'ui.schrift_sehr_gross'   => 'Найбільший',
+        'ui.bedienung_hinweis'    => 'Твій вибір залишається лише на цьому пристрої – збережений у браузері, не в нас.',
+        'ui.uebersetzung_hinweis' => 'Вихідні дані та політика конфіденційності є лише німецькою – саме вони юридично зобовʼязують.',
+        'ui.menue_oeffnen'        => 'Відкрити меню',
+        'ui.menue_schliessen'     => 'Закрити меню',
+        'ui.hauptmenue'           => 'Головне меню',
+
+        'menue.start'       => 'Головна',
+        'menue.buchen'      => 'Записатися',
+        'menue.abrufen'     => 'Мій запис',
+        'menue.termine_ort' => 'Дати та місце',
+        'menue.mitmachen'   => 'Долучитися',
+        'menue.impressum'   => 'Вихідні дані',
+        'menue.datenschutz' => 'Конфіденційність',
+
+        'datum.wochentage' => ['неділя', 'понеділок', 'вівторок', 'середа', 'четвер', 'пʼятниця', 'субота'],
+        'datum.uhrzeit'    => '%s год.',
+        'datum.format'     => '%1$s, %2$s',
+
+        'buchen.schritt_was'        => 'Що',
+        'buchen.schritt_wann'       => 'Коли',
+        'buchen.schritt_abschicken' => 'Надіслати',
+        'buchen.schritt_von'        => 'Крок %1$d з %2$d',
+        'buchen.was_frage'          => 'Що ти хочеш полагодити?',
+        'buchen.keine_kategorien'   => 'Наразі ми не приймаємо записів. Загляни за кілька днів.',
+        'buchen.zurueck_kategorie'  => 'інша категорія',
+        'buchen.wann_frage'         => 'Вибери вільний час',
+        'buchen.keine_termine'      => 'Наразі вільних місць немає. Загляни за кілька днів.',
+        'buchen.vergeben'           => 'вже зайнято',
+        'buchen.zurueck_termin'     => 'інший час',
+        'buchen.abschicken_kopf'    => 'Надіслати запит',
+        'buchen.was_kaputt'         => 'Що зламалося?',
+        'buchen.freiwillig'         => 'за бажанням',
+        'buchen.beispiel'           => 'напр. «батарея телефона швидко сідає» або «гальмо електровелосипеда тре»',
+        'buchen.absenden'           => 'Надіслати запит на час',
+        'buchen.hinweis'            => 'Ще не підтверджено — ми розглянемо запит і звʼяжемося з тобою.',
+
+        'fehler.nonce'     => 'Перевірка безпеки не вдалася. Зазвичай так буває, коли сторінка довго була відкрита. Вибери час ще раз.',
+        'fehler.weg'       => 'Цього часу вже немає. Вибери, будь ласка, інший.',
+        'fehler.belegt'    => 'Цей час щойно зайняли. Вибери, будь ласка, інший.',
+        'fehler.speichern' => 'Зберегти не вдалося. Спробуй ще раз.',
+        /*
+         * Die Zahl steht hinter dem Doppelpunkt und nicht im Satz: Im
+         * Ukrainischen richtet sich die Endung von „запис" nach ihr
+         * (2 записи, 5 записів). Die Grenze ist einstellbar (2 bis 20),
+         * also passt keine feste Endung — die Aufzaehlungsform schon.
+         */
+        'fehler.zuviel'    => 'З цього зʼєднання вже заброньовано записів: %d – більше одночасно не можна, щоб вистачило всім. '
+                              . 'Якщо скасуєш один із них у розділі «Мій запис», місце звільниться одразу. '
+                              . 'Якщо тобі справді потрібно більше, напиши нам коротко на електронну пошту.',
+        'fehler.zuschnell' => 'Це надійшло надто швидко одне за одним. Зачекай хвилинку і надішли запит ще раз.',
+
+        'feld.note' => 'Опис проблеми',
+        'feld.cat'  => 'Напрям',
+        'feld.date' => 'Дата',
+        'feld.time' => 'Час',
+        'feld.code' => 'Код запису',
+
+        'status.angefragt'  => 'Запитано',
+        'status.bestaetigt' => 'Підтверджено',
+        'status.offen'      => 'Відкрито',
+        'status.erledigt'   => 'Виконано',
+        'status.storniert'  => 'Скасовано',
+
+        'abruf.nicht_verfuegbar'  => 'Керування записами наразі недоступне.',
+        'abruf.vorgemerkt_kopf'   => 'Запис зафіксовано.',
+        'abruf.vorgemerkt_text'   => 'Ми його розглянемо і звʼяжемося з тобою.',
+        'abruf.storniert'         => 'Твій запис скасовано. Місце знову вільне для інших.',
+        'abruf.code_weg'          => 'Такий код не знайдено (можливо, його вже скасовано).',
+        'abruf.code_unbekannt'    => 'Такий код не знайдено.',
+        'abruf.sicherheit'        => 'Перевірка безпеки не вдалася, спробуй ще раз.',
+        'abruf.neuer_code_weg'    => 'Новий код не знайдено. Ти вже завершив бронювання нового часу?',
+        'abruf.alter_code'        => 'Це ще твій старий код. Спершу заброньуй новий час нижче.',
+        'abruf.verschoben'        => 'Готово! Твій старий запис скасовано, новий запис (код %s) залишається.',
+        'abruf.abgemeldet'        => 'Готово. Для цього коду більше не збережено електронної адреси. Твій запис лишається без змін.',
+        'abruf.mail_ungueltig'    => 'Це не схоже на дійсну електронну адресу.',
+        'abruf.nichts_gespeichert' => 'Нічого не збережено.',
+        'abruf.kontakt_geloescht' => 'Для твого запису більше не збережено контактних даних. Запис лишається.',
+        'abruf.signal_link'       => 'посилання Signal',
+        'abruf.signal_name'       => 'імʼя користувача Signal',
+        'abruf.email_adresse'     => 'електронну адресу',
+        'abruf.und'               => '%1$s і %2$s',
+        'abruf.gespeichert'       => 'Збережено: %s.',
+        'abruf.bleibt_gespeichert' => 'Твої дані зберігатимуться, доки ти сам їх тут не видалиш.',
+        'abruf.wird_geloescht'    => 'Твої дані буде автоматично видалено після візиту.',
+        'abruf.leer'              => 'Там ще нічого не було написано.',
+        'abruf.danke_antwort'     => 'Дякуємо! Твоя відповідь у нас.',
+        'abruf.notiert'           => 'Занотовано — ми додали це до твого запису.',
+        'abruf.nicht_gefunden'    => 'Запису з таким кодом не знайдено. Перевір написання (напр. RC-AB12C).',
+
+        'abruf.abmelden_kopf'  => 'Сповіщення електронною поштою',
+        'abruf.abmelden_frage' => 'Видалити адресу для %s?',
+        'abruf.abmelden_text'  => 'Тоді ми приберемо збережену електронну адресу. Повідомлень більше не буде. Твій запис лишається – ним нічого не скасовується.',
+        'abruf.abmelden_ja'    => 'Так, видалити адресу',
+        'abruf.abmelden_nein'  => 'Ні, назад до мого запису',
+
+        'abruf.dein_code'        => 'Твій код запису',
+        'abruf.termin_anzeigen'  => 'Показати запис',
+        'abruf.dein_termin'      => 'Твій запис',
+        'abruf.termin_unbekannt' => 'Дата невідома',
+        'abruf.kategorie'        => 'Категорія',
+
+        'abruf.frage_an_dich'    => 'Питання до тебе',
+        'abruf.deine_antwort'    => 'Твоя відповідь',
+        'abruf.antwort_senden'   => 'Надіслати відповідь',
+        'abruf.bisher'           => 'Про що вже говорили',
+        'abruf.du'               => 'Ти',
+        'abruf.wir'              => 'Ми',
+        'abruf.nachtragen'       => 'Хочеш щось додати?',
+        'abruf.nachtragen_hilfe' => 'Наприклад, що саме зламалося або що ти візьмеш із собою. Ми побачимо це перед візитом.',
+        'abruf.deine_notiz'      => 'Твоя нотатка',
+        'abruf.absenden'         => 'Надіслати',
+
+        'abruf.link_label'        => 'Твій код %s — ось він як посилання:',
+        'abruf.kopieren'          => 'Копіювати',
+        'abruf.kopiert'           => 'Скопійовано ✓',
+        'abruf.gemerkt'           => 'Цей пристрій запамʼятовує запис — наступного разу він буде тут угорі. ',
+        'abruf.nicht_merken'      => 'не запамʼятовувати',
+        'abruf.vergessen'         => 'Добре, цей пристрій більше нічого не запамʼятовує. Збережи свій код.',
+        'abruf.meine_termine'     => 'Твої записи на цьому пристрої',
+        'abruf.mein_termin'       => 'Твій запис на цьому пристрої',
+        'abruf.code_anzeigen'     => 'показати %s',
+        'abruf.anderer_code'      => 'Або введи нижче інший код. ',
+        'abruf.gemerkte_loeschen' => 'видалити збережені записи',
+
+        'abruf.offen_kopf' => 'Ще не підтверджено.',
+        'abruf.offen_text' => 'Ми розглянемо твій запит і звʼяжемося з тобою.',
+
+        'abruf.kontakt_kopf'   => 'Як ми можемо звʼязатися з тобою',
+        'abruf.kontakt_intro'  => 'За бажанням – якщо залишиш порожнім, нічого не зміниться. Так ми звертаємося, коли треба щось уточнити або коли твій запис підтверджено.',
+        'abruf.email'          => 'Електронна пошта',
+        'abruf.signal_feld'    => 'Посилання Signal або імʼя користувача',
+        'abruf.signal_hinweis' => 'Найкраще – посилання Signal (у Signal: Налаштування → Профіль → Імʼя користувача → Копіювати посилання). '
+                                  . 'Імʼя користувача теж підійде. Твій номер телефону нам не потрібен.',
+        'abruf.keep'           => 'Зберігати також після візиту.',
+        'abruf.keep_zusatz'    => 'Без цієї позначки дані буде видалено після візиту.',
+        'abruf.aendern_speichern' => 'Зберегти зміну',
+        'abruf.kontakt_speichern' => 'Зберегти контакт',
+        'abruf.gespeichert_kopf'  => 'Збережено:',
+        'abruf.und_wort'          => 'і',
+        'abruf.dein_link'         => 'твоє посилання',
+        'abruf.bleibt_bis'        => 'зберігається, доки ти це не видалиш',
+        'abruf.nach_termin_weg'   => 'буде видалено після візиту',
+        'abruf.loeschen_hinweis'  => 'Щоб видалити, просто очисти відповідне поле і збережи.',
+
+        'abruf.kalender'         => 'Додати до календаря',
+        'abruf.verschieben'      => 'Перенести запис',
+        'abruf.stornieren'       => 'Скасувати запис',
+        'abruf.stornieren_frage' => 'Справді скасувати цей запис?',
+        'abruf.verschieben_kopf' => 'Як перенести свій запис:',
+        'abruf.verschieben_1'    => 'Заброньуй нижче новий час звичайним способом – ти отримаєш новий код.',
+        'abruf.verschieben_2'    => 'Потім введи тут новий код. Ми автоматично скасуємо твій старий запис (%s).',
+        'abruf.neuer_code'       => 'Твій новий код запису',
+        'abruf.alten_stornieren' => 'Скасувати старий запис зараз',
+    ],
+
+    ];
+
+    return $buch;
 }
