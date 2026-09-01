@@ -914,6 +914,36 @@ Karte 7,7:1, Fußzeile 13,0:1. Alles über den 4,5:1 der WCAG-Stufe AA.
 - **Sprachen zusätzlich als reine Links im Seitenfuß** — das Feld oben
   braucht JavaScript zum Aufklappen, die Links funktionieren immer.
 
+#### Nachtrag 1.29.3: der Kasten, nicht seine Mitte
+
+Auf dem Handy stimmte es, am Tablet nicht. Ab 782 px wird das Menü kein
+Vollbild mehr, sondern ein abgerundetes Feld, das rechts unter dem Knopf
+schwebt — und dieses Feld war `.rfat-nav-overlay__list`, also **nur das
+`<nav>`**. Sprache und Ansicht standen als Geschwister daneben, im
+Overlay, dessen Hintergrund dort durchsichtig ist: Sie legten sich quer
+über Seitenkopf und Hero.
+
+Jetzt umschließt `.rfat-nav-overlay__feld` alle drei Blöcke, und dieser
+Kasten schwebt. Auf dem Handy ändert das nichts — dort ist das Menü
+ohnehin die ganze Seite.
+
+Zwei Sachen fielen beim Nachmessen mit Chromium auf:
+
+- **Der Kasten wurde zu hoch** (890 px Inhalt bei 648 px Platz auf einem
+  1024 × 768-Tablet). 380 px Breite statt 320 bringen mehr als es klingt:
+  Vier Sprachnamen passen in eine Reihe statt drei, und das spart zwei
+  Reihen. Dazu engere Menüpunkte im Feld — auf dem Handy zeigt der Daumen,
+  hier die Maus. Zusammen 798 px.
+- **Die Unterkante stand auf der Bildschirmkante.** Mit
+  `max-height: calc(100vh - …)` traf sie je nach Fenster genau auf, und
+  dann sieht ein Kasten, der innen scrollt, aus wie einer, der
+  abgeschnitten ist. Jetzt ist er oben **und** unten verankert
+  (`top: 84px; bottom: max(20px, …)`), die runde Ecke ist immer zu sehen.
+
+Dass der Rest scrollt, ist richtig so: Oben steht, was zählt — die
+Sprachen für den, der die Seite nicht lesen kann, und darunter das Menü.
+Ansicht und Schriftgröße stellt man einmal ein, nicht bei jedem Besuch.
+
 ---
 
 ### 3.16 Der Lage-Kasten (1.29.0)
@@ -1068,6 +1098,7 @@ Fällen `admin` steht.
 | 1.29.0 | **Lage-Kasten** in der Übersicht: Buchungen, abgewiesene Versuche, fehlgeschlagene Anmeldungen (siehe 3.16) |
 | 1.29.1 | **Dunkelmodus richtiggestellt:** Er färbte `body`, aber `.page-body` des Themes liegt mit `background:#fff` darüber — heller Text auf weißem Grund. Jetzt über die Variablen des Themes. Sprache/Ansicht wandern in das Menü, weil der zweite Knopf den Seitenkopf überdeckte (siehe 3.15) |
 | 1.29.2 | **Anmeldeversuche im Klartext:** Zeitpunkt und eingetippter Benutzername statt nur einer Zahl — „admin", „root", „wp-admin" ist ein Skript, der eigene Name ist etwas anderes (siehe 3.17) |
+| 1.29.3 | **Sprache und Ansicht im schwebenden Feld:** Am Rechner und auf dem Tablet lagen sie neben dem Menü quer über der Seite — nur das `<nav>` war das Feld, nicht der ganze Kasten (siehe 3.15) |
 
 ---
 

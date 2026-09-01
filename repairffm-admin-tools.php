@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern. (4) Mehrsprachig (Deutsch, Englisch, Türkisch, Arabisch, Ukrainisch) und für alle bedienbar: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Tastaturfokus – die Wahl bleibt im Browser, nichts davon erreicht den Server.
- * Version: 1.29.2
+ * Version: 1.29.3
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -3639,15 +3639,31 @@ add_action('wp_head', function () {
             .rfat-nav-overlay__bar {
                 display: none;
             }
-            .rfat-nav-overlay__list {
+            .rfat-nav-overlay__feld {
                 position: absolute;
                 top: 84px;
                 right: max(14px, env(safe-area-inset-right));
-                width: min(320px, calc(100vw - 28px));
-                max-height: calc(100vh - 120px);
+                /*
+                 * 380 statt 320 Pixel. Nicht aus Geschmack: In den
+                 * schmaleren Kasten passten vier Sprachnamen in zwei
+                 * Reihen und die vier Ansichten ebenfalls in zwei — das
+                 * sind zwei Reihen mehr, und damit rutschte „Schriftgroesse"
+                 * unter die Kante. Breiter heisst hier kuerzer.
+                 */
+                width: min(380px, calc(100vw - 28px));
+                /*
+                 * Oben UND unten verankert statt einer gerechneten
+                 * Hoechsthoehe: Mit `max-height: calc(100vh - …)` stand die
+                 * Unterkante je nach Fenster genau auf der Bildschirmkante,
+                 * und dann sieht ein Kasten, der innen scrollt, aus wie
+                 * einer, der abgeschnitten ist. Mit einem festen Abstand
+                 * nach unten ist die runde Ecke immer zu sehen — und damit
+                 * auch, dass da noch etwas kommt.
+                 */
+                bottom: max(20px, env(safe-area-inset-bottom));
                 overflow-y: auto;
+                overscroll-behavior: contain;
                 box-sizing: border-box;
-                gap: 4px;
                 padding: 10px;
                 background: var(--rfat-flaeche);
                 border-radius: 20px;
@@ -3658,25 +3674,47 @@ add_action('wp_head', function () {
                 opacity: 0;
                 transition: transform .16s ease, opacity .16s ease;
             }
-            .rfat-nav-overlay.is-open .rfat-nav-overlay__list {
+            .rfat-nav-overlay.is-open .rfat-nav-overlay__feld {
                 transform: none;
                 opacity: 1;
             }
+            .rfat-nav-overlay__list {
+                gap: 4px;
+                padding: 0;
+            }
+            /* Im schwebenden Feld ist der Rand des Kastens der Rand —
+               die 22px vom Handy stuenden hier doppelt. */
+            .rfat-nav-overlay__feld .rfat-bedienung { padding-left: 0; padding-right: 0; }
+            .rfat-nav-overlay__feld .rfat-bedienung--oben { padding-bottom: 8px; }
+            .rfat-nav-overlay__feld .rfat-bedienung--unten {
+                margin-top: 8px;
+                padding-top: 10px;
+                padding-bottom: 2px;
+            }
+            .rfat-nav-overlay__feld .rfat-bedienung__titel { margin-bottom: 6px; }
+            .rfat-nav-overlay__feld .rfat-bedienung__gruppe { margin-bottom: 10px; }
             /*
              * Der geschrumpfte Knopf sitzt hoeher, das Feld muss mit. Ueber
              * den Nachbarschafts-Selektor statt ueber das Skript: Die Klasse
              * steht schon an der Leiste, und das Overlay folgt ihr
              * unmittelbar.
              */
-            .rfat-topbar.is-small + .rfat-nav-overlay .rfat-nav-overlay__list {
+            .rfat-topbar.is-small + .rfat-nav-overlay .rfat-nav-overlay__feld {
                 top: 64px;
             }
             /*
              * Im weissen Feld wirken weisse Kaertchen mit Rand wie Kaesten
              * im Kasten. Hier tragen die Punkte nur ihren Hover.
              */
+            /*
+             * Im Feld enger als auf dem Handy: Dort ist der Daumen das
+             * Zeigegeraet und jeder Punkt darf gross sein; hier stehen
+             * ueber und unter den Punkten noch Sprache und Ansicht im
+             * selben Kasten, und sechs Punkte zu 50 Pixeln schoben ihn
+             * ueber die Fensterhoehe. Die 16px standen hier schon.
+             */
             .rfat-nav-overlay__list .rfat-nav-link {
-                padding: 11px 14px;
+                padding: 9px 14px;
                 border-color: transparent;
                 border-radius: 12px;
                 background: transparent;
@@ -3709,7 +3747,7 @@ add_action('wp_head', function () {
             }
         }
         @media (prefers-reduced-motion: reduce) {
-            .rfat-nav-overlay__list {
+            .rfat-nav-overlay__feld {
                 transition: none;
                 transform: none;
             }
@@ -4314,7 +4352,7 @@ add_action('wp_head', function () {
         [dir="rtl"] .rc-error { border-left: 0; border-right: 4px solid var(--rfat-fehler); }
         [dir="rtl"] .rfat-nav-overlay__bar { justify-content: flex-start; }
         @media (min-width: 783px) {
-            [dir="rtl"] .rfat-nav-overlay__list {
+            [dir="rtl"] .rfat-nav-overlay__feld {
                 right: auto;
                 left: max(14px, env(safe-area-inset-left));
                 transform-origin: top left;
@@ -4330,7 +4368,7 @@ add_action('wp_head', function () {
          */
         @media (prefers-reduced-motion: reduce) {
             .rfat-nav-overlay,
-            .rfat-nav-overlay__list,
+            .rfat-nav-overlay__feld,
             .rfat-pub-zeile,
             .btn {
                 transition-duration: .01ms !important;
@@ -5955,6 +5993,21 @@ add_action('wp_footer', function () {
                 </svg>
             </button>
         </div>
+
+        <?php
+        /*
+         * Sprachen, Menuepunkte, Ansicht: drei Bloecke, ein Kasten.
+         *
+         * Der Kasten ist der Grund, warum es ihn gibt. Auf dem Handy faellt
+         * er nicht auf — das Menue ist dort ohnehin die ganze Seite. Am
+         * Rechner und auf dem Tablet schwebt ein abgerundetes Feld rechts
+         * unter dem Knopf, und bis 1.29.2 war das nur das <nav>: Sprachen
+         * und Ansicht standen als Geschwister daneben und legten sich quer
+         * ueber Seitenkopf und Hero, weil der Hintergrund des Overlays dort
+         * durchsichtig ist. Jetzt schwebt der Kasten, nicht seine Mitte.
+         */
+        ?>
+        <div class="rfat-nav-overlay__feld">
         <?php
         /*
          * Sprache ganz oben, noch vor den Menuepunkten.
@@ -6054,6 +6107,7 @@ add_action('wp_footer', function () {
             'ui.uebersetzung_hinweis',
             'Impressum und Datenschutz stehen nur auf Deutsch – sie sind rechtlich verbindlich.'
         ); ?></p>
+        </div>
         </div>
     </div>
 
