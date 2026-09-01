@@ -842,6 +842,56 @@ weiße Seite auf, und genau das ist für lichtempfindliche Augen das, was weh
 tut. Der Datenschutz nennt das jetzt ausdrücklich (Abschnitt „Sprache und
 Ansicht", `RFAT_BEDIENUNG_ABSATZ`).
 
+#### Nachtrag 1.29.1: was an 1.28.0 falsch war
+
+Zwei Fehler, beide auf dem Handy sofort sichtbar — und beide vermeidbar
+gewesen, wenn die Seite einmal im Browser angesehen worden wäre statt nur
+das erzeugte CSS geprüft.
+
+**Heller Text auf weißem Grund.** 1.28.0 hat im Dunkelmodus `body` dunkel
+gefärbt und Überschriften, Links und Fließtext hell — in der Annahme, das
+Theme male nichts darüber. Es malt aber: `.page-body{background:#fff}`,
+`.site-header{background:var(--white)}`, dazu `.card`, `.panel`,
+`.split-section`, `.hero .pill`. Übrig blieb die dunkle Fläche in den
+Lücken zwischen den Blöcken — die schwarzen Balken auf dem Bildschirmfoto —
+und heller Text auf allem anderen. Unlesbar.
+
+Die Ursache war nicht der Code, sondern die Annahme: „Das Theme kennen wir
+nicht." Wir kennen es. `repairffm-block` gehört zum selben Projekt, seine
+`style.css` hat 97 Zeilen, und sie rechnet selbst in Variablen — `--ink`,
+`--sand`, `--white`, `--line`, `--muted`, `--green*`. WordPress stellt
+dieselben Farben noch einmal als `--wp--preset--color--…` bereit.
+
+Der Dunkelmodus legt jetzt **beide Sätze auf unsere Tokens** und färbt
+damit die ganze Seite, ohne eine einzige geratene Regel. Übrig bleiben die
+fünf Stellen, an denen das Theme `#fff` direkt hinschreibt; die stehen
+einzeln in `rfat_theme_regeln()`. Zwei Sonderfälle:
+
+- **Der Seitenfuß** ist schon im hellen Modus dunkel
+  (`background: var(--ink)`). Würde er einfach mitgedreht, wäre er im
+  Dunkelmodus hell — mit seiner hellen Schrift. Dafür gibt es
+  `--rfat-fuss`.
+- **Die Knöpfe des Themes** tragen ihr Weiß fest im Stylesheet von
+  WordPress (`:root :where(.wp-element-button){color:#ffffff}`). Auf dem
+  hellen Grün des Dunkelmodus wären das gut 2:1 — dieselbe Falle wie beim
+  eigenen `.btn`, nur an einer Stelle, an die wir nicht gedacht hatten.
+
+Alles greift nur, wenn `repairffm-block` wirklich aktiv ist
+(`rfat_eigenes_theme()`). Auf einem fremden Theme bleibt die Seite hell und
+nur die Bauteile dieses Plugins drehen sich mit — wenig, aber nie unlesbar.
+
+**Der zweite Knopf in der Leiste.** „DE" neben dem Hamburger lag auf dem
+Handy über dem Untertitel im Seitenkopf. Die Leiste schwebt über dem Kopf
+des Themes, und breiter darf sie dort nicht werden. Sprache, Ansicht und
+Schriftgröße stehen deshalb **im Menü**: die Sprachen gleich oben, als
+Reihe kleiner Chips mit den Namen in ihrer eigenen Schrift; Ansicht und
+Schrift unter den Menüpunkten. „Termin buchen" bleibt der auffälligste
+Punkt — ein großer grüner Knopf gegen ein paar Chips.
+
+Nachgemessen mit Chromium auf der echten Seite (390 × 844, beide Ansichten):
+Fließtext 15,7:1, Knopfschrift auf Grün 7,7:1, gedämpfter Text auf einer
+Karte 7,7:1, Fußzeile 13,0:1. Alles über den 4,5:1 der WCAG-Stufe AA.
+
 #### Was sonst noch für die Bedienung getan wurde
 
 - **Sichtbarer Tastaturfokus überall.** Wer nicht zeigen kann — Tastatur,
@@ -911,6 +961,59 @@ Die Gesamtzahl läuft weiter, Aufschlüsselung und Zeitliste beginnen neu.
 
 ---
 
+### 3.17 Anmeldeversuche im Klartext (1.29.2)
+
+1.29.0 hat fehlgeschlagene Anmeldungen nur gezählt: *„14 fehlgeschlagen,
+davon 12 mit unbekanntem Namen."* Das sagt, **dass** an der Tür gerüttelt
+wurde — aber nicht **womit**, und damit nicht, ob man etwas tun muss.
+
+Ein Blick auf die Namen beantwortet das in einer Sekunde:
+
+| Was in der Liste steht | Was es heißt |
+|---|---|
+| `admin`, `root`, `wp-admin`, `administrator`, `test` | Ein Skript, das dieselbe Liste an Millionen Seiten durchprobiert. Grundrauschen, nichts zu tun. |
+| Der eigene Anmeldename | Etwas anderes. Jemand weiß, wen es hier gibt. |
+| Leer abgeschickt | Meist ein kaputter Bot oder ein Fehlklick. |
+
+Deshalb steht unter dem Lage-Kasten jetzt ein zugeklapptes
+`Versuche im Klartext anzeigen (n)` mit Zeitpunkt und eingetipptem Namen,
+neueste zuerst, dazu die Notiz, ob es den Namen hier überhaupt gibt.
+
+**Was gespeichert wird:** Zeitpunkt, Benutzername, und ob der Name
+existiert — die letzten 200 Versuche, ältere fallen automatisch heraus.
+
+**Was nicht:** die IP-Adresse und das Kennwort. Das Kennwort erreicht den
+Haken `wp_login_failed` gar nicht erst. Die Adresse wäre die naheliegende
+dritte Spalte, und genau deshalb steht hier, warum sie fehlt: Diese Seite
+speichert an **keiner** Stelle eine IP-Adresse, nicht einmal bei der
+Buchungssperre (dort nur ein nicht umkehrbarer Prüfwert). Die Namensliste
+beantwortet die Frage bereits; die Adresse wäre der erste Bruch mit einem
+Grundsatz, der die Seite sonst überall trägt.
+
+Drei Dinge, die dabei zu beachten waren:
+
+- **Der Name kommt von außen.** Er wird beim Speichern durch
+  `sanitize_text_field()` und auf 60 Zeichen gekürzt, beim Anzeigen noch
+  einmal maskiert. Ein Skript, das statt `admin` ein Stück HTML einsendet,
+  steht in der Übersicht als Text und nicht als Markup.
+- **Die Zeitstempel gab es schon** (`zeiten`, seit 1.29.0). Sie werden
+  nicht mehr fortgeschrieben — dieselbe Zeit an zwei Stellen läuft früher
+  oder später auseinander. Was drinsteht, bleibt und wird mitgelesen; in
+  der Liste steht dann „vor diesem Update — Name nicht mitgeschrieben"
+  statt eines leeren Feldes.
+- **Löschen gehört dazu.** Was sich speichern lässt, muss sich von Hand
+  wieder löschen lassen, nicht nur automatisch nach 200 Einträgen. Der
+  Knopf leert die Liste und lässt die Zählung oben stehen — sie ist die
+  Aussage, die den Kasten trägt, und sie mitzulöschen hätte niemand
+  bestellt.
+
+Der Datenschutz nennt es jetzt (`RFAT_ANMELDUNG_ABSATZ`, eingesetzt über
+die vorhandene Absatz-Pflege, `RFAT_DS_SIGNAL_FASSUNG` auf `5`). Ein Name
+kann eine Person bezeichnen — auch wenn dort in neunundneunzig von hundert
+Fällen `admin` steht.
+
+---
+
 ## 4. Versionshistorie
 
 | Version | Inhalt |
@@ -963,6 +1066,8 @@ Die Gesamtzahl läuft weiter, Aufschlüsselung und Zeitliste beginnen neu.
 | 1.27.1 | Mail-Fehler klarer gedeutet: Microsofts SMTP-Sperre, falsche Absenderadresse, dichtes Container-Netz |
 | 1.28.0 | **Fünf Sprachen** (de/en/tr/ar/uk) und **Bedienung für alle**: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Fokus (siehe 3.15) |
 | 1.29.0 | **Lage-Kasten** in der Übersicht: Buchungen, abgewiesene Versuche, fehlgeschlagene Anmeldungen (siehe 3.16) |
+| 1.29.1 | **Dunkelmodus richtiggestellt:** Er färbte `body`, aber `.page-body` des Themes liegt mit `background:#fff` darüber — heller Text auf weißem Grund. Jetzt über die Variablen des Themes. Sprache/Ansicht wandern in das Menü, weil der zweite Knopf den Seitenkopf überdeckte (siehe 3.15) |
+| 1.29.2 | **Anmeldeversuche im Klartext:** Zeitpunkt und eingetippter Benutzername statt nur einer Zahl — „admin", „root", „wp-admin" ist ein Skript, der eigene Name ist etwas anderes (siehe 3.17) |
 
 ---
 
