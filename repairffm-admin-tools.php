@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern. (4) Mehrsprachig (Deutsch, Englisch, Türkisch, Arabisch, Ukrainisch) und für alle bedienbar: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Tastaturfokus – die Wahl bleibt im Browser, nichts davon erreicht den Server.
- * Version: 1.29.1
+ * Version: 1.29.2
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -1063,8 +1063,8 @@ function rfat_platzhalter_finden() {
  * Die Lage in Zahlen: Buchungen, abgewiesene Versuche, fehlgeschlagene
  * Anmeldungen.
  *
- * Alles aus dem, was ohnehin mitgezaehlt wird — ohne Adressen, ohne Namen.
- * Die Bewertung am Ende ist bewusst grob: Sie soll den Blick lenken, nicht
+ * Alles aus dem, was ohnehin mitgezaehlt wird — ohne Adressen. Die
+ * Bewertung am Ende ist bewusst grob: Sie soll den Blick lenken, nicht
  * Alarm schlagen.
  */
 function rfat_lage() {
@@ -1074,6 +1074,15 @@ function rfat_lage() {
     $login = is_array($login) ? $login : [];
 
     $buchungen = wp_count_posts('rc_booking');
+
+    /*
+     * Die Zeitpunkte der Anmeldeversuche kommen jetzt aus der Liste
+     * (rfat_login_versuche), nicht mehr aus `zeiten`: Seit 1.29.2 stehen
+     * sie dort samt Namen, und `zeiten` wird nicht mehr fortgeschrieben.
+     * Die Funktion liest beides und deckt damit auch den Bestand aus
+     * 1.29.0 ab.
+     */
+    $anmelde_zeiten = array_column(rfat_login_versuche(), 'zeit');
 
     $lage = [
         'buchungen'      => (int) ($buchungen->publish ?? 0),
@@ -1087,8 +1096,8 @@ function rfat_lage() {
         'abgewiesen_zeit' => (int) ($limit['zeit'] ?? 0),
 
         'anmeldungen'     => (int) ($login['anzahl'] ?? 0),
-        'anmeldungen_24h' => rfat_zeiten_zaehlen($login['zeiten'] ?? [], DAY_IN_SECONDS),
-        'anmeldungen_7t'  => rfat_zeiten_zaehlen($login['zeiten'] ?? [], 7 * DAY_IN_SECONDS),
+        'anmeldungen_24h' => rfat_zeiten_zaehlen($anmelde_zeiten, DAY_IN_SECONDS),
+        'anmeldungen_7t'  => rfat_zeiten_zaehlen($anmelde_zeiten, 7 * DAY_IN_SECONDS),
         'unbekannt'       => (int) ($login['unbekannt'] ?? 0),
         'anmeldungen_zeit' => (int) ($login['zeit'] ?? 0),
     ];
@@ -1193,6 +1202,9 @@ function rfat_render_overview_page() {
         <?php if (isset($_GET['rfat_limit_saved'])): ?>
             <div class="notice notice-success is-dismissible"><p>Buchungsgrenze gespeichert.</p></div>
         <?php endif; ?>
+        <?php if (isset($_GET['rfat_login_geleert'])): ?>
+            <div class="notice notice-success is-dismissible"><p>Die Liste der Anmeldeversuche wurde geleert.</p></div>
+        <?php endif; ?>
         <?php
         $lage = rfat_lage();
         $stand = function ($wann) {
@@ -1241,9 +1253,81 @@ function rfat_render_overview_page() {
                     </tr>
                 </tbody>
             </table>
+
+            <?php
+            /*
+             * Die Versuche im Klartext.
+             *
+             * Zugeklappt, weil es der Blick fuer den Zweifelsfall ist und
+             * nicht der taegliche: Oben steht die Zahl, hier steht, was
+             * dahinter steckt. Aufgeklappt beantwortet die Namensspalte in
+             * einer Sekunde die einzige Frage, die zaehlt — „admin",
+             * „root", „wp-admin", „test" ist ein Skript, das dieselbe
+             * Liste an Millionen Seiten durchprobiert. Steht dort der
+             * eigene Anmeldename, ist es etwas anderes.
+             */
+            $versuche = rfat_login_versuche();
+            ?>
+            <?php if ($versuche): ?>
+                <details style="margin-top:10px;">
+                    <summary style="cursor:pointer;font-weight:600;">
+                        Versuche im Klartext anzeigen (<?php echo count($versuche); ?>)
+                    </summary>
+                    <table class="widefat striped" style="max-width:720px;margin-top:8px;">
+                        <thead>
+                            <tr>
+                                <th style="width:38%;">Zeitpunkt</th>
+                                <th>Eingetippter Benutzername</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($versuche as $versuch): ?>
+                                <tr>
+                                    <td><?php echo esc_html($stand($versuch['zeit'])); ?></td>
+                                    <td>
+                                        <?php if ($versuch['name'] === ''): ?>
+                                            <?php
+                                            /*
+                                             * Zwei verschiedene Gruende fuer ein leeres Feld, und
+                                             * sie bedeuten Verschiedenes: Ein Eintrag aus 1.29.0
+                                             * hat nie einen Namen gehabt; ein neuer ohne Namen
+                                             * heisst, dass jemand das Feld leer abgeschickt hat.
+                                             */
+                                            ?>
+                                            <span class="description"><?php
+                                                echo $versuch['bekannt'] === null
+                                                    ? 'vor diesem Update — Name nicht mitgeschrieben'
+                                                    : 'leer abgeschickt';
+                                            ?></span>
+                                        <?php else: ?>
+                                            <code><?php echo esc_html($versuch['name']); ?></code>
+                                            <?php if ($versuch['bekannt']): ?>
+                                                <span class="description">— diesen Namen gibt es hier</span>
+                                            <?php else: ?>
+                                                <span class="description">— unbekannt</span>
+                                            <?php endif; ?>
+                                        <?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                    <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>"
+                          style="margin-top:8px;"
+                          onsubmit="return confirm('Die Liste der Anmeldeversuche wirklich leeren? Die Zahlen oben bleiben.');">
+                        <?php wp_nonce_field('rfat_login_leeren'); ?>
+                        <input type="hidden" name="action" value="rfat_login_leeren" />
+                        <button type="submit" class="button">Liste leeren</button>
+                        <span class="description">Die Zählung oben bleibt bestehen.</span>
+                    </form>
+                </details>
+            <?php endif; ?>
+
             <p class="description" style="margin:8px 0 0;">
-                Gezählt wird seit dem Update auf 1.28.0 — Älteres steht hier nicht.
-                Gespeichert sind nur Anzahl und Zeitpunkt: <strong>keine Adressen, keine Benutzernamen</strong>.
+                Gezählt wird seit dem Update auf 1.28.0, die Namen seit 1.29.2 — Älteres steht hier nicht.
+                Gespeichert sind Zeitpunkt und der eingetippte Benutzername, die letzten
+                <?php echo (int) RFAT_LOGIN_MAX; ?> Versuche. <strong>Keine IP-Adressen und keine Kennwörter</strong>
+                — das Kennwort reicht WordPress hier gar nicht erst weiter.
                 Ein unbekannter Benutzername ist das Kennzeichen des Durchprobierens; wer sein eigenes
                 Passwort vertippt, trifft fast immer einen vorhandenen Namen.
             </p>
@@ -6699,6 +6783,16 @@ define('RFAT_FRAGEN_ABSATZ', '<h2>Rückfragen zu deinem Termin</h2><p>Manchmal m
  * es trotzdem: Der TDDDG unterscheidet nicht zwischen Cookie und
  * localStorage, und eine Erklaerung, in der die Haelfte fehlt, ist keine.
  */
+/*
+ * Fehlgeschlagene Anmeldungen — siehe den Abschnitt am `wp_login_failed`.
+ *
+ * Seit 1.29.2 steht dort der eingetippte Benutzername im Klartext. Ein
+ * Name kann eine Person bezeichnen; damit ist es eine Verarbeitung
+ * personenbezogener Daten, und die gehoert in die Erklaerung — auch wenn
+ * dort in neunundneunzig von hundert Faellen „admin" steht.
+ */
+define('RFAT_ANMELDUNG_ABSATZ', '<h2>Fehlgeschlagene Anmeldungen</h2><p>Der Verwaltungsbereich dieser Website steht unter <code>/wp-login.php</code>. Schlägt dort eine Anmeldung fehl, halten wir <strong>Zeitpunkt und den eingetippten Benutzernamen</strong> fest – die letzten 200 Versuche. Grund ist ein einfacher: An dieser Tür wird von automatisierten Skripten dauernd gerüttelt, und ohne diese Liste ließe sich nicht unterscheiden, ob jemand hier gezielt vorgeht oder ob es der übliche Grundrauschen-Angriff ist, der jede Website im Netz trifft.</p><p><strong>Nicht gespeichert werden dabei: die IP-Adresse und das eingegebene Kennwort.</strong> Das Kennwort erreicht diese Stelle gar nicht erst; die Adresse brauchen wir für die Unterscheidung nicht. Ein Wiedererkennen über andere Websites hinweg ist damit nicht möglich.</p><p><strong>Rechtsgrundlage:</strong> unser berechtigtes Interesse an der Sicherheit dieser Website (Art. 6 Abs. 1 lit. f DSGVO).</p><p><strong>Speicherdauer:</strong> Ältere Einträge fallen automatisch heraus, sobald 200 neuere vorliegen. Unabhängig davon lässt sich die Liste im Verwaltungsbereich jederzeit von Hand leeren.</p>');
+
 define('RFAT_BEDIENUNG_ABSATZ', '<h2>Sprache und Ansicht</h2><p>Oben rechts lassen sich <strong>Sprache</strong>, <strong>Ansicht</strong> (automatisch, hell, dunkel, hoher Kontrast) und <strong>Schriftgröße</strong> einstellen. Diese drei Angaben legt dein Browser <strong>auf deinem Gerät</strong> ab (localStorage) – so wie den Buchungscode. Sie werden <strong>nicht an uns übertragen</strong>, sind für andere Websites nicht lesbar und dienen allein dazu, dir die Seite beim nächsten Besuch so zu zeigen, wie du sie eingestellt hast. Das ist für die von dir gewünschte Funktion erforderlich (§ 25 Abs. 2 Nr. 2 TDDDG). Die gewählte Sprache steht zusätzlich als <code>?sprache=…</code> in der Adresszeile – damit lässt sich eine Seite in dieser Sprache weitergeben. Zurücksetzen kannst du alles jederzeit über „Ansicht: Automatisch" und „Sprache: Deutsch" oder indem du in deinem Browser die Websitedaten für diese Seite löschst.</p>');
 
 define('RFAT_SIGNAL_ABSATZ', '<h2>Freiwilliger Kontakt über Signal</h2><p>Statt einer E-Mail-Adresse – oder zusätzlich dazu – kannst du freiwillig deinen <strong>Signal-Benutzernamen</strong> oder deinen <strong>Signal-Link</strong> hinterlegen, damit wir dich zu deinem Termin erreichen können. Auch diese Angabe ist <strong>nicht erforderlich</strong>; ohne sie ändert sich nichts. Gespeichert wird ausschließlich, was du selbst einträgst – der Benutzername oder der Link, den Signal für dich erzeugt. <strong>Deine Telefonnummer bekommen wir dabei nicht zu sehen</strong>; genau dafür gibt es Benutzername und Link bei Signal. Der Link enthält keinen Klartext-Namen, sondern eine Kennung, mit der Signal deinen dort verschlüsselt abgelegten Benutzernamen findet.</p><p><strong>Rechtsgrundlage:</strong> deine Einwilligung (Art. 6 Abs. 1 lit. a DSGVO).</p><p><strong>Speicherdauer:</strong> wie bei der E-Mail-Adresse. Nach deinem Termin wird die Angabe automatisch gelöscht, bei einer Stornierung sofort. Mit dem Häkchen „Meine Angaben dürfen auch nach dem Termin gespeichert bleiben" bleibt sie, bis du sie selbst wieder löschst.</p><p><strong>Widerruf:</strong> Rufe deinen Termin unter <a href="/termin-abrufen/">Termin abrufen</a> mit deinem Buchungscode auf, leere das Signal-Feld und speichere.</p><p><strong>Empfänger:</strong> Schreiben wir dir über Signal, läuft die Nachricht über den Dienst der Signal Messenger, LLC; deren Bedingungen und deren Ende-zu-Ende-Verschlüsselung gelten dann zusätzlich. Deine Angabe geben wir nicht an Dritte weiter und verwenden sie nicht für Werbung.</p>');
@@ -7024,6 +7118,9 @@ function rfat_datenschutz_text_pflegen($alt) {
     $neu = rfat_absatz_setzen($neu, '<h2>Sprache und Ansicht</h2>', RFAT_BEDIENUNG_ABSATZ,
         ['<h2>Server-Protokolle</h2>', '<h2>Deine Rechte</h2>']);
 
+    $neu = rfat_absatz_setzen($neu, '<h2>Fehlgeschlagene Anmeldungen</h2>', RFAT_ANMELDUNG_ABSATZ,
+        ['<h2>Deine Rechte</h2>', '<h2>Kontakt in Datenschutzfragen</h2>']);
+
     return $neu;
 }
 
@@ -7077,7 +7174,7 @@ function rfat_datenschutz_signal_absatz() {
  * Fassung des Signal-Absatzes. Hochzählen, wenn sich der Text ändert —
  * dann zieht die Routine ihn auf bestehenden Seiten nach.
  */
-define('RFAT_DS_SIGNAL_FASSUNG', '4');   // 4: Abschnitt „Sprache und Ansicht"
+define('RFAT_DS_SIGNAL_FASSUNG', '5');   // 5: Abschnitt „Fehlgeschlagene Anmeldungen"
 
 add_action('init', function () {
     if (get_option('rfat_ds_signal') === RFAT_DS_SIGNAL_FASSUNG) {
@@ -7419,19 +7516,68 @@ function rfat_zeiten_zaehlen($zeiten, $sekunden) {
 }
 
 /*
- * Fehlgeschlagene Anmeldungen zaehlen.
+ * Fehlgeschlagene Anmeldungen zaehlen — und seit 1.29.2 auch auflisten.
  *
  * WordPress meldet sie, merkt sie sich aber nicht. Wer wissen will, ob an
  * seiner Tuer geruettelt wurde, hat ohne das keine Antwort — und genau die
  * Frage kommt, sobald einem etwas seltsam vorkommt.
  *
- * Gespeichert werden Anzahl, Zeitpunkte und eine einzige Unterscheidung:
- * ob der versuchte Benutzername ueberhaupt existiert. Ein unbekannter Name
- * ist das Kennzeichen des Durchprobierens — echte Vertipper treffen fast
- * immer einen vorhandenen Namen. **Der Name selbst wird nicht gespeichert**,
- * und die Adresse auch nicht: Beides braucht es fuer diese Aussage nicht.
+ * 1.29.0 hat nur gezaehlt: „14 fehlgeschlagen, davon 12 mit unbekanntem
+ * Namen". Das sagt, DASS geruettelt wurde, aber nicht womit — und damit
+ * nicht, ob man etwas tun muss. Ein Blick auf die Namen beantwortet es in
+ * einer Sekunde: „admin", „root", „wp-admin", „test" ist ein Skript, das
+ * dieselbe Liste an Millionen Seiten durchprobiert und das man ignorieren
+ * kann. Steht dort der eigene Anmeldename, ist es etwas anderes.
+ *
+ * Was gespeichert wird: Zeitpunkt, der eingetippte Benutzername im
+ * Klartext, und ob es ihn hier ueberhaupt gibt. Die letzten 200 Versuche,
+ * aeltere fallen heraus.
+ *
+ * Was NICHT gespeichert wird: die IP-Adresse. Sie stuende in keinem
+ * Verhaeltnis — die Namensliste beantwortet die Frage schon, und diese
+ * Seite speichert an keiner einzigen Stelle eine Adresse, nicht einmal
+ * bei der Buchungssperre (dort nur ein Pruefwert). Das Kennwort wird
+ * selbstverstaendlich nirgends angefasst; WordPress reicht es an diesen
+ * Haken gar nicht erst weiter.
  */
 define('RFAT_LOGIN_LOG', 'rfat_login_log');
+define('RFAT_LOGIN_MAX', 200);
+
+/**
+ * Die Liste der Versuche, neueste zuerst.
+ *
+ * Die Zeitstempel aus 1.29.0 stehen noch unter `zeiten` und haben keinen
+ * Namen. Sie hier mit anzuhaengen ist ehrlicher, als sie verschwinden zu
+ * lassen: Der Eintrag sagt dann „vor diesem Update, Name nicht
+ * mitgeschrieben" statt gar nichts.
+ */
+function rfat_login_versuche() {
+    $log = get_option(RFAT_LOGIN_LOG);
+    if (!is_array($log)) {
+        return [];
+    }
+
+    $liste = [];
+    foreach ((array) ($log['zeiten'] ?? []) as $wann) {
+        $liste[] = ['zeit' => (int) $wann, 'name' => '', 'bekannt' => null];
+    }
+    foreach ((array) ($log['versuche'] ?? []) as $eintrag) {
+        if (!is_array($eintrag)) {
+            continue;
+        }
+        $liste[] = [
+            'zeit'    => (int) ($eintrag['zeit'] ?? 0),
+            'name'    => (string) ($eintrag['name'] ?? ''),
+            'bekannt' => isset($eintrag['bekannt']) ? (bool) $eintrag['bekannt'] : null,
+        ];
+    }
+
+    usort($liste, function ($a, $b) {
+        return $b['zeit'] <=> $a['zeit'];
+    });
+
+    return $liste;
+}
 
 add_action('wp_login_failed', function ($benutzername) {
     $log = get_option(RFAT_LOGIN_LOG);
@@ -7441,13 +7587,67 @@ add_action('wp_login_failed', function ($benutzername) {
     $log['anzahl'] = (int) ($log['anzahl'] ?? 0) + 1;
     $log['zeit']   = time();
 
-    $name = (string) $benutzername;
-    if ($name !== '' && !get_user_by('login', $name) && !get_user_by('email', $name)) {
+    $name    = (string) $benutzername;
+    $bekannt = ($name !== '' && (get_user_by('login', $name) || get_user_by('email', $name)));
+    if ($name !== '' && !$bekannt) {
         $log['unbekannt'] = (int) ($log['unbekannt'] ?? 0) + 1;
     }
 
-    $log['zeiten'] = rfat_zeiten_anhaengen($log['zeiten'] ?? [], time());
+    /*
+     * Der Name kommt aus einem Anmeldeformular, ist also beliebiger Text
+     * von aussen. Er wird hier gekuerzt und gesaeubert abgelegt und beim
+     * Anzeigen noch einmal maskiert — ein Skript, das statt „admin" ein
+     * Stueck HTML einsendet, soll in der Uebersicht als Text stehen und
+     * nicht als Markup.
+     */
+    $versuche   = (array) ($log['versuche'] ?? []);
+    $versuche[] = [
+        'zeit'    => time(),
+        'name'    => mb_substr(sanitize_text_field($name), 0, 60),
+        'bekannt' => $bekannt,
+    ];
+    if (count($versuche) > RFAT_LOGIN_MAX) {
+        $versuche = array_slice($versuche, -RFAT_LOGIN_MAX);
+    }
+    $log['versuche'] = $versuche;
+
+    /*
+     * `zeiten` wird nicht mehr fortgeschrieben: Dieselbe Zeit stuende
+     * sonst an zwei Stellen, und die eine liefe der anderen frueher oder
+     * spaeter davon. Was aus 1.29.0 drinsteht, bleibt stehen, bis es
+     * durch die Deckelung von selbst herausfaellt — gelesen wird es
+     * weiterhin (siehe rfat_login_versuche()).
+     */
     update_option(RFAT_LOGIN_LOG, $log, false);
+});
+
+/**
+ * Liste leeren.
+ *
+ * Der ehrliche Gegenpart dazu, dass hier jetzt Namen stehen: Was sich
+ * speichern laesst, muss sich auch wieder loeschen lassen — und zwar von
+ * Hand, nicht nur automatisch nach 200 Eintraegen.
+ */
+add_action('admin_post_rfat_login_leeren', function () {
+    if (!current_user_can('manage_options')) {
+        wp_die('Keine Berechtigung.');
+    }
+    check_admin_referer('rfat_login_leeren');
+
+    $log = get_option(RFAT_LOGIN_LOG);
+    if (is_array($log)) {
+        /*
+         * Nur die Liste, nicht die Zaehler: „Seit dem Update 14 Versuche"
+         * ist die Aussage, die den Kasten oben traegt. Sie mit dem
+         * Aufraeumen der Namen zurueckzusetzen, waere ein zweiter Effekt,
+         * den niemand bestellt hat.
+         */
+        unset($log['versuche'], $log['zeiten']);
+        update_option(RFAT_LOGIN_LOG, $log, false);
+    }
+
+    wp_safe_redirect(add_query_arg('rfat_login_geleert', '1', wp_get_referer() ?: admin_url()));
+    exit;
 });
 
 /*
@@ -8154,6 +8354,7 @@ if (!function_exists('rc_build_slots')) {
     <h2>Cookies</h2>
     <!--RFAT_COOKIES-->
     <!--RFAT_BEDIENUNG-->
+    <!--RFAT_ANMELDUNG-->
     <h2>Server-Protokolle</h2>
     <p>Beim Aufruf verarbeitet der Betrieb technisch bedingt Zugriffsdaten (IP-Adresse, Datum/Uhrzeit, aufgerufene Seite, Datenmenge, Browsertyp). Diese dienen ausschließlich dem sicheren, stabilen Betrieb und der Abwehr von Angriffen (Art. 6 Abs. 1 lit. f DSGVO) und werden nur kurz gespeichert.</p>
     <h2>Auslieferung über Cloudflare (CDN)</h2>
@@ -8171,6 +8372,7 @@ if (!function_exists('rc_build_slots')) {
         $dsg = str_replace('<!--RFAT_SIGNAL-->', RFAT_SIGNAL_ABSATZ, $dsg);
         $dsg = str_replace('<!--RFAT_FRAGEN-->', RFAT_FRAGEN_ABSATZ, $dsg);
         $dsg = str_replace('<!--RFAT_BEDIENUNG-->', RFAT_BEDIENUNG_ABSATZ, $dsg);
+        $dsg = str_replace('<!--RFAT_ANMELDUNG-->', RFAT_ANMELDUNG_ABSATZ, $dsg);
 
         $pages = array(
             'termin-buchen' => array('Termin buchen',
