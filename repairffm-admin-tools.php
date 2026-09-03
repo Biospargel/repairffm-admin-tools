@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern. (4) Mehrsprachig (Deutsch, Englisch, Türkisch, Arabisch, Ukrainisch) und für alle bedienbar: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Tastaturfokus – die Wahl bleibt im Browser, nichts davon erreicht den Server.
- * Version: 1.29.3
+ * Version: 1.29.4
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -3931,17 +3931,33 @@ define('RFAT_SPRACHE_SCHLUESSEL', 'rfat_sprache');
  */
 function rfat_ansicht_farben($ansicht) {
     if ($ansicht === 'dunkel') {
+        /*
+         * „Dark dark": tiefer als der erste Dunkelmodus. Der Grund war ein
+         * gedaempftes Grau-Gruen (#111714) — auf einem OLED-Display ist das
+         * ein sichtbares Grau, kein Schwarz. Jetzt naeher an Schwarz, mit
+         * nur noch einem Hauch Gruen, damit die Seite nicht kalt wird.
+         *
+         * Die Flaechen behalten ihren Abstand zum Grund, sonst verschwaenden
+         * die Karten im Hintergrund: Grund fast schwarz, Karte eine Stufe
+         * heller, Rand noch eine. Text und Gruentoene bleiben wie gehabt —
+         * sie stehen auf noch dunklerem Grund und werden dadurch nur besser
+         * lesbar (Fliesstext rechnerisch ~16:1, gedaempft ~8:1, Gruen ~12:1).
+         *
+         * Bewusst NICHT angefasst: der Seitenrand. Das Padding steckt in
+         * eigenen Regeln (--wp--style--root--padding-*) und hat mit der
+         * Palette nichts zu tun.
+         */
         return '
             color-scheme: dark;
-            --rfat-grund: #111714;
-            --rfat-flaeche: #1a2320;
-            --rfat-flaeche-2: #212b27;
-            --rfat-flaeche-3: #1d2723;
+            --rfat-grund: #070a09;
+            --rfat-flaeche: #0f1512;
+            --rfat-flaeche-2: #151c18;
+            --rfat-flaeche-3: #111713;
             --rfat-text: #e9f0ec;
             --rfat-leise: #a9b6ae;
             --rfat-leiser: #7f8d85;
-            --rfat-rand: #2f3b36;
-            --rfat-rand-stark: #45534d;
+            --rfat-rand: #232c27;
+            --rfat-rand-stark: #3a453f;
             /*
              * Helles Gruen auf dunklem Grund — und deshalb DUNKLE Schrift
              * darauf. Weiss auf diesem Gruen kaeme auf ein Verhaeltnis von
@@ -3960,7 +3976,7 @@ function rfat_ansicht_farben($ansicht) {
             --rfat-fehler: #ea7d68;
             --rfat-fehler-flaeche: #3a1f1a;
             --rfat-fehler-text: #f7bcb0;
-            --rfat-schatten: rgba(0, 0, 0, .45);
+            --rfat-schatten: rgba(0, 0, 0, .55);
             --rfat-fokus: #ffffff;
             /*
              * Zwei Flaechen, die das Theme selbst faerbt und die deshalb
@@ -3968,9 +3984,12 @@ function rfat_ansicht_farben($ansicht) {
              * Seitenfuss. Der Fuss ist schon im hellen Modus dunkel
              * (`background: var(--ink)`) — wuerde er einfach mitgedreht,
              * waere er im Dunkelmodus hell mit heller Schrift.
+             *
+             * Beide jetzt tiefer, damit sie zum „dark dark"-Grund passen:
+             * der Verlauf faellt fast auf Schwarz, der Fuss ist Schwarz.
              */
-            --rfat-hero: linear-gradient(160deg, #1c2f24 0%, #141a17 100%);
-            --rfat-fuss: #0b110e;
+            --rfat-hero: linear-gradient(160deg, #0f1a14 0%, #070b09 100%);
+            --rfat-fuss: #000000;
         ';
     }
 
