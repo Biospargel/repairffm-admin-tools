@@ -1044,6 +1044,54 @@ Fällen `admin` steht.
 
 ---
 
+### 3.18 Seiten-Übersetzung im WP-Editor (1.30.0)
+
+Bis 1.29 übersetzte das Plugin nur, was **es selbst erzeugt** (Menü,
+Buchungsablauf, Bedienfeld, Fehlermeldungen). Der **Inhalt der
+WordPress-Seiten** — „Termine & Ort", „Mitmachen", die Einleitungen der
+Buchungsseiten — blieb deutsch, weil er im Seiten-Editor steht und nicht
+im Plugin.
+
+Feste Übersetzungen im Code wären hier falsch: Der Betreiber will die
+Seiten weiter **im WP-Editor bearbeiten**, und sobald der deutsche Text
+sich ändert, liefe eine hartkodierte Übersetzung ihm davon.
+
+**Der Weg:** Zu jeder übersetzbaren Seite kommt im Editor die Metabox
+*„Übersetzungen (mehrsprachig)"* mit je einem Titel- und Inhaltsfeld für
+Englisch, Türkisch, Arabisch, Ukrainisch. Ist `?sprache=en` aktiv, tauscht
+das Plugin auf der Front-Seite Titel und Inhalt gegen das englische Feld —
+gleiche Adresse, gleiche Buchungslogik.
+
+- **Gespeichert** als ein Meta-Feld je Seite, verschachtelt nach Sprache:
+  `_rfat_uebersetzung = ['en' => ['titel'=>…, 'inhalt'=>…], …]`.
+- **Rückfall pro Feld:** Fehlt eine Übersetzung (oder nur der Inhalt),
+  bleibt es beim deutschen Text. Nie ein kaputter Zustand.
+- **Inhalt** wird beim Speichern mit `wp_kses_post` gefiltert (erlaubtes
+  HTML), der Titel mit `sanitize_text_field`.
+- **Front-Umschaltung:** `the_content` (Priorität **1**, damit der
+  übersetzte HTML-Text noch durch `do_shortcode` läuft — die
+  Buchungsseiten tragen `[repairffm_booking]` im Text), `the_title` und
+  `document_title_parts`. Alle vier greifen nur, wenn die Seite die
+  **Hauptseite** dieses Aufrufs ist (`post_id === get_queried_object_id()`)
+  — Menüeinträge und Beiträge in Nebenschleifen bleiben unberührt.
+- **Tabu** (`rfat_uebersetzung_tabu()`): `impressum`, `datenschutz`
+  (rechtlich verbindlich, bleiben deutsch) und die WordPress-Beispielseite.
+
+**Noch offen (Folgeschritt):** Die **Startseite** ist keine Seite, sondern
+eine Site-Editor-Vorlage — deshalb greift die Metabox dort nicht. Sie soll
+in eine echte Seite umgewandelt werden, damit sie dasselbe System bekommt.
+Das ist bewusst getrennt, weil das Layout der Startseite heikel ist und
+eine Live-Prüfung braucht.
+
+**Nicht in einem echten WordPress getestet** — nur `php -l`, Plugin-Ladetest
+mit Attrappe und die Umschalt-Logik gegen eine PHP-Attrappe (DE zeigt
+Deutsch, EN tauscht, AR mit leerem Inhalt fällt auf Deutsch zurück, Tabu
+bleibt deutsch, Menüeintrag wird nicht getauscht). Vor dem Bekanntmachen in
+`wp-admin` prüfen: erscheint die Metabox, speichert sie, schaltet
+`?sprache=en` den Seiteninhalt um.
+
+---
+
 ## 4. Versionshistorie
 
 | Version | Inhalt |
@@ -1099,6 +1147,8 @@ Fällen `admin` steht.
 | 1.29.1 | **Dunkelmodus richtiggestellt:** Er färbte `body`, aber `.page-body` des Themes liegt mit `background:#fff` darüber — heller Text auf weißem Grund. Jetzt über die Variablen des Themes. Sprache/Ansicht wandern in das Menü, weil der zweite Knopf den Seitenkopf überdeckte (siehe 3.15) |
 | 1.29.2 | **Anmeldeversuche im Klartext:** Zeitpunkt und eingetippter Benutzername statt nur einer Zahl — „admin", „root", „wp-admin" ist ein Skript, der eigene Name ist etwas anderes (siehe 3.17) |
 | 1.29.3 | **Sprache und Ansicht im schwebenden Feld:** Am Rechner und auf dem Tablet lagen sie neben dem Menü quer über der Seite — nur das `<nav>` war das Feld, nicht der ganze Kasten (siehe 3.15) |
+| 1.29.4 | **Dunkelmodus tiefer („dark dark"):** Grund von `#111714` auf `#070a09`, Fußzeile schwarz, Hero-Verlauf tief nachgezogen; nur die Palette, Seitenrand unberührt |
+| 1.30.0 | **Seiten-Übersetzung im WP-Editor:** Metabox mit Titel/Inhalt je Sprache, Front-Umschaltung über `?sprache=`; Impressum/Datenschutz tabu (siehe 3.18) |
 
 ---
 

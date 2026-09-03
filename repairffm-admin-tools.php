@@ -2,7 +2,7 @@
 /**
  * Plugin Name: RepairFFM – Buchungen Übersicht & Selbstverwaltung
  * Description: (1) Admin-Übersicht der Termin-Buchungen (rc_booking) mit einstellbaren Kategorien und Uhrzeiten – ansehen, bearbeiten, Status setzen, löschen. (2) Shortcode [rfat_manage_booking] für Besucher: eigenen Termin per Code ansehen, stornieren oder verschieben – ohne Konto, Kontakt (E-Mail, Signal-Benutzername oder Signal-Link) nur freiwillig. Rückfragen an den Gast, Antworten und eigene Notizen auf der Terminseite. Übersicht mit Zusagen/Ablehnen, Signal-Knopf und fertigem Nachrichtentext. (3) Sperre gegen Mehrfachbuchungen: Ein Anschluss kann nur eine begrenzte Zahl offener Termine halten – ohne die IP-Adresse zu speichern. (4) Mehrsprachig (Deutsch, Englisch, Türkisch, Arabisch, Ukrainisch) und für alle bedienbar: Dunkelmodus, hoher Kontrast, größere Schrift, sichtbarer Tastaturfokus – die Wahl bleibt im Browser, nichts davon erreicht den Server.
- * Version: 1.29.3
+ * Version: 1.30.0
  * Author: Till (mit Claude)
  * Text Domain: rfat
  * Update URI: https://github.com/Biospargel/repairffm-admin-tools
@@ -327,6 +327,218 @@ function rfat_menue_label($url, $label) {
     ];
     return isset($bekannt[$slug]) ? rfat_t($bekannt[$slug][0], $bekannt[$slug][1]) : $label;
 }
+
+
+/* =========================================================================
+ * SEITEN-ÜBERSETZUNG — im WP-Editor bearbeitbar
+ *
+ * Das Wörterbuch weiter unten übersetzt, was das PLUGIN erzeugt (Menü,
+ * Buchungsablauf, Bedienfeld). Der Inhalt der WordPress-SEITEN — „Termine
+ * & Ort", „Mitmachen", die Einleitungen der Buchungsseiten — steht dagegen
+ * im Seiten-Editor und gehört dir. Feste Übersetzungen im Code wären hier
+ * falsch: Sobald du den deutschen Text änderst, liefe die Übersetzung ihm
+ * davon.
+ *
+ * Deshalb dieser Weg: Zu jeder übersetzbaren Seite kommen im Editor Felder
+ * für Englisch, Türkisch, Arabisch und Ukrainisch dazu. Den deutschen Text
+ * bearbeitest du wie immer; die Übersetzungen tippst du in die Felder. Ist
+ * „?sprache=en" aktiv, zeigt das Plugin das englische Feld statt des
+ * deutschen — gleiche Adresse, gleiche Buchungslogik, nichts hartkodiert.
+ * Fehlt eine Übersetzung, bleibt es beim deutschen Text: nie ein kaputter
+ * Zustand, höchstens der deutsche als Rückfall.
+ *
+ * Gespeichert als ein Meta-Feld je Seite (verschachtelt nach Sprache):
+ *   _rfat_uebersetzung = ['en' => ['titel'=>…, 'inhalt'=>…], 'tr' => …]
+ *
+ * Impressum und Datenschutz bekommen die Felder NICHT — sie sind rechtlich
+ * verbindlich und bleiben deutsch.
+ * ========================================================================= */
+define('RFAT_UEBERSETZUNG_META', '_rfat_uebersetzung');
+define('RFAT_UEBERSETZUNG_NONCE', 'rfat_uebersetzung_speichern');
+
+/**
+ * Seiten, die deutsch bleiben. Über den Slug, nicht die ID: Der Slug ist
+ * stabil und wird an anderen Stellen des Plugins ohnehin so geführt.
+ */
+function rfat_uebersetzung_tabu() {
+    return ['impressum', 'datenschutz', 'beispiel-seite'];
+}
+
+/** Darf diese Seite übersetzt werden? */
+function rfat_seite_uebersetzbar($post) {
+    if (!$post instanceof WP_Post) {
+        $post = get_post($post);
+    }
+    if (!$post || $post->post_type !== 'page') {
+        return false;
+    }
+    return !in_array($post->post_name, rfat_uebersetzung_tabu(), true);
+}
+
+/** Die gespeicherten Übersetzungen einer Seite, immer als Array. */
+function rfat_uebersetzung_lesen($post_id) {
+    $roh = get_post_meta($post_id, RFAT_UEBERSETZUNG_META, true);
+    return is_array($roh) ? $roh : [];
+}
+
+/**
+ * Der übersetzte Wert eines Feldes ('titel' oder 'inhalt') in der aktuellen
+ * Sprache — oder '' , wenn nichts hinterlegt ist. Deutsch fragt hier nie an.
+ */
+function rfat_uebersetzung_feld($post_id, $feld) {
+    $sprache = rfat_sprache();
+    if ($sprache === RFAT_SPRACHE_STANDARD) {
+        return '';
+    }
+    $alle = rfat_uebersetzung_lesen($post_id);
+    $wert = isset($alle[$sprache][$feld]) ? (string) $alle[$sprache][$feld] : '';
+    return trim($wert) === '' ? '' : $wert;
+}
+
+/* ------------------------------------------------------------------ Editor */
+
+add_action('add_meta_boxes', function () {
+    add_meta_box(
+        'rfat-uebersetzung',
+        'Übersetzungen (mehrsprachig)',
+        'rfat_uebersetzung_metabox',
+        'page',
+        'normal',
+        'default'
+    );
+});
+
+function rfat_uebersetzung_metabox($post) {
+    if (!rfat_seite_uebersetzbar($post)) {
+        echo '<p>Diese Seite bleibt bewusst deutsch (Impressum/Datenschutz sind rechtlich verbindlich).</p>';
+        return;
+    }
+
+    wp_nonce_field(RFAT_UEBERSETZUNG_NONCE, 'rfat_uebersetzung_nonce');
+    $alle = rfat_uebersetzung_lesen($post->ID);
+
+    echo '<p style="margin:0 0 12px;color:#50575e;">Leer lassen heißt: In dieser Sprache wird der deutsche Text gezeigt. '
+       . 'HTML ist erlaubt — am einfachsten den deutschen Text als Vorlage nehmen und Wort für Wort ersetzen.</p>';
+
+    foreach (rfat_sprachen() as $code => $info) {
+        if ($code === RFAT_SPRACHE_STANDARD) {
+            continue;
+        }
+        $titel  = isset($alle[$code]['titel'])  ? (string) $alle[$code]['titel']  : '';
+        $inhalt = isset($alle[$code]['inhalt']) ? (string) $alle[$code]['inhalt'] : '';
+        $dir    = $info['dir'] === 'rtl' ? ' dir="rtl"' : '';
+        $tid    = 'rfat-ue-' . $code;
+
+        echo '<fieldset style="border:1px solid #dcdcde;border-radius:6px;padding:12px 14px;margin:0 0 14px;">';
+        echo '<legend style="font-weight:600;padding:0 6px;">' . esc_html($info['eigen'])
+           . ' <span style="color:#787c82;font-weight:400;">(' . esc_html($info['deutsch']) . ')</span></legend>';
+
+        echo '<p style="margin:0 0 6px;"><label for="' . esc_attr($tid . '-titel') . '" style="font-weight:600;">Titel</label></p>';
+        echo '<input type="text" id="' . esc_attr($tid . '-titel') . '" name="rfat_ue[' . esc_attr($code) . '][titel]"'
+           . $dir . ' value="' . esc_attr($titel) . '" class="widefat" style="margin-bottom:10px;" />';
+
+        echo '<p style="margin:0 0 6px;"><label for="' . esc_attr($tid . '-inhalt') . '" style="font-weight:600;">Inhalt</label></p>';
+        echo '<textarea id="' . esc_attr($tid . '-inhalt') . '" name="rfat_ue[' . esc_attr($code) . '][inhalt]"'
+           . $dir . ' rows="8" class="widefat" style="font-family:monospace;">' . esc_textarea($inhalt) . '</textarea>';
+
+        echo '</fieldset>';
+    }
+}
+
+add_action('save_post_page', function ($post_id, $post) {
+    // Autospeicherung, Revisionen und fehlende Rechte übergehen.
+    if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
+        return;
+    }
+    if (!isset($_POST['rfat_uebersetzung_nonce'])
+        || !wp_verify_nonce($_POST['rfat_uebersetzung_nonce'], RFAT_UEBERSETZUNG_NONCE)) {
+        return;
+    }
+    if (!current_user_can('edit_page', $post_id)) {
+        return;
+    }
+    if (!rfat_seite_uebersetzbar($post)) {
+        return;
+    }
+
+    $eingang = isset($_POST['rfat_ue']) && is_array($_POST['rfat_ue']) ? wp_unslash($_POST['rfat_ue']) : [];
+    $sauber  = [];
+
+    foreach (rfat_sprachen() as $code => $info) {
+        if ($code === RFAT_SPRACHE_STANDARD || !isset($eingang[$code]) || !is_array($eingang[$code])) {
+            continue;
+        }
+        $titel  = isset($eingang[$code]['titel'])  ? sanitize_text_field($eingang[$code]['titel']) : '';
+        // Wie beim Seiteninhalt: erlaubtes HTML durchlassen, Schädliches raus.
+        $inhalt = isset($eingang[$code]['inhalt']) ? wp_kses_post($eingang[$code]['inhalt']) : '';
+
+        if (trim($titel) !== '' || trim($inhalt) !== '') {
+            $sauber[$code] = ['titel' => $titel, 'inhalt' => $inhalt];
+        }
+    }
+
+    if ($sauber) {
+        update_post_meta($post_id, RFAT_UEBERSETZUNG_META, $sauber);
+    } else {
+        delete_post_meta($post_id, RFAT_UEBERSETZUNG_META);
+    }
+}, 10, 2);
+
+/* --------------------------------------------------------------- Front-end */
+
+/**
+ * Nur die HAUPT-Seite dieses Aufrufs anfassen — nicht Menüeinträge, nicht
+ * Beiträge in einer Schleife nebenan. Titel und Inhalt teilen dieselbe
+ * Bedingung, deshalb eine Funktion.
+ */
+function rfat_uebersetzung_greift($post_id) {
+    if (is_admin() || rfat_sprache() === RFAT_SPRACHE_STANDARD) {
+        return false;
+    }
+    if (!is_singular() || !is_main_query() || (int) $post_id !== (int) get_queried_object_id()) {
+        return false;
+    }
+    return rfat_seite_uebersetzbar($post_id);
+}
+
+/*
+ * Der Inhalt.
+ *
+ * Prioritaet 1, damit der uebersetzte HTML-Text noch durch die normalen
+ * Inhaltsfilter laeuft — vor allem do_shortcode: Die Buchungsseiten tragen
+ * `[repairffm_booking]` im Text, und der soll auch in der Uebersetzung
+ * seinen (ohnehin uebersetzten) Ablauf rendern.
+ */
+add_filter('the_content', function ($content) {
+    $post_id = get_the_ID();
+    if (!$post_id || !rfat_uebersetzung_greift($post_id) || !in_the_loop()) {
+        return $content;
+    }
+    $ue = rfat_uebersetzung_feld($post_id, 'inhalt');
+    return $ue !== '' ? $ue : $content;
+}, 1);
+
+/* Der Titel in der Seite (Ueberschrift). */
+add_filter('the_title', function ($title, $post_id = 0) {
+    if (!$post_id || !rfat_uebersetzung_greift($post_id) || !in_the_loop()) {
+        return $title;
+    }
+    $ue = rfat_uebersetzung_feld($post_id, 'titel');
+    return $ue !== '' ? $ue : $title;
+}, 10, 2);
+
+/* Der Titel im Browser-Tab. */
+add_filter('document_title_parts', function ($parts) {
+    $post_id = get_queried_object_id();
+    if (!$post_id || !rfat_uebersetzung_greift($post_id)) {
+        return $parts;
+    }
+    $ue = rfat_uebersetzung_feld($post_id, 'titel');
+    if ($ue !== '') {
+        $parts['title'] = $ue;
+    }
+    return $parts;
+});
 
 // Internal WP core meta keys we never want to show/edit.
 /**
@@ -3931,17 +4143,33 @@ define('RFAT_SPRACHE_SCHLUESSEL', 'rfat_sprache');
  */
 function rfat_ansicht_farben($ansicht) {
     if ($ansicht === 'dunkel') {
+        /*
+         * „Dark dark": tiefer als der erste Dunkelmodus. Der Grund war ein
+         * gedaempftes Grau-Gruen (#111714) — auf einem OLED-Display ist das
+         * ein sichtbares Grau, kein Schwarz. Jetzt naeher an Schwarz, mit
+         * nur noch einem Hauch Gruen, damit die Seite nicht kalt wird.
+         *
+         * Die Flaechen behalten ihren Abstand zum Grund, sonst verschwaenden
+         * die Karten im Hintergrund: Grund fast schwarz, Karte eine Stufe
+         * heller, Rand noch eine. Text und Gruentoene bleiben wie gehabt —
+         * sie stehen auf noch dunklerem Grund und werden dadurch nur besser
+         * lesbar (Fliesstext rechnerisch ~16:1, gedaempft ~8:1, Gruen ~12:1).
+         *
+         * Bewusst NICHT angefasst: der Seitenrand. Das Padding steckt in
+         * eigenen Regeln (--wp--style--root--padding-*) und hat mit der
+         * Palette nichts zu tun.
+         */
         return '
             color-scheme: dark;
-            --rfat-grund: #111714;
-            --rfat-flaeche: #1a2320;
-            --rfat-flaeche-2: #212b27;
-            --rfat-flaeche-3: #1d2723;
+            --rfat-grund: #070a09;
+            --rfat-flaeche: #0f1512;
+            --rfat-flaeche-2: #151c18;
+            --rfat-flaeche-3: #111713;
             --rfat-text: #e9f0ec;
             --rfat-leise: #a9b6ae;
             --rfat-leiser: #7f8d85;
-            --rfat-rand: #2f3b36;
-            --rfat-rand-stark: #45534d;
+            --rfat-rand: #232c27;
+            --rfat-rand-stark: #3a453f;
             /*
              * Helles Gruen auf dunklem Grund — und deshalb DUNKLE Schrift
              * darauf. Weiss auf diesem Gruen kaeme auf ein Verhaeltnis von
@@ -3960,7 +4188,7 @@ function rfat_ansicht_farben($ansicht) {
             --rfat-fehler: #ea7d68;
             --rfat-fehler-flaeche: #3a1f1a;
             --rfat-fehler-text: #f7bcb0;
-            --rfat-schatten: rgba(0, 0, 0, .45);
+            --rfat-schatten: rgba(0, 0, 0, .55);
             --rfat-fokus: #ffffff;
             /*
              * Zwei Flaechen, die das Theme selbst faerbt und die deshalb
@@ -3968,9 +4196,12 @@ function rfat_ansicht_farben($ansicht) {
              * Seitenfuss. Der Fuss ist schon im hellen Modus dunkel
              * (`background: var(--ink)`) — wuerde er einfach mitgedreht,
              * waere er im Dunkelmodus hell mit heller Schrift.
+             *
+             * Beide jetzt tiefer, damit sie zum „dark dark"-Grund passen:
+             * der Verlauf faellt fast auf Schwarz, der Fuss ist Schwarz.
              */
-            --rfat-hero: linear-gradient(160deg, #1c2f24 0%, #141a17 100%);
-            --rfat-fuss: #0b110e;
+            --rfat-hero: linear-gradient(160deg, #0f1a14 0%, #070b09 100%);
+            --rfat-fuss: #000000;
         ';
     }
 
